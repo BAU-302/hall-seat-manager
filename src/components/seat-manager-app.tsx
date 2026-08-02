@@ -1,32 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
+import { FALLBACK_HALLS, FALLBACK_SESSIONS } from "@/lib/hall-catalog";
+import type { Hall, HallId, Session } from "@/lib/hall-catalog";
 
 type SeatStatus = "distributed" | "entered" | "empty" | "onsite";
 type SeatRange = readonly [number, number] | null;
 type RowConfig = { row: string; blocks: SeatRange[] };
 type Floor = "1층" | "2층";
 type Seat = { id: string; row: string; number: number; status: SeatStatus };
-type HallId = "haeun" | "art" | "yerang";
-type Hall = { id: HallId; name: string; floors: string; capacity: number; note: string };
-type SessionTone = "neutral" | "ready" | "live";
-type Session = {
-  id: string;
-  hallId: HallId;
-  date: string;
-  shortDate: string;
-  time: string;
-  endTime: string;
-  event: string;
-  round: string;
-  status: string;
-  statusTone: SessionTone;
-  distributed: number;
-  entered: number;
-};
 type MenuId = "dashboard" | "seats" | "allocation" | "entry" | "scan" | "generate" | "reassign" | "history" | "events";
 type Activity = readonly [string, string, string, string];
 
@@ -241,19 +226,21 @@ const MENU: Array<[MenuId, string]> = [
   ["events", "행사 관리"],
 ];
 
-const HALLS: Hall[] = [
-  { id: "haeun", name: "하은홀", floors: "1층 · 2층", capacity: 694, note: "오늘 행사 2건" },
-  { id: "art", name: "아트홀", floors: "1층", capacity: 370, note: "예정 행사 2건" },
-  { id: "yerang", name: "예랑홀", floors: "1층", capacity: 200, note: "오늘 행사 1건" },
-];
+type CatalogContextValue = {
+  halls: Hall[];
+  sessions: Session[];
+  dataSource: "supabase" | "fallback";
+};
 
-const SESSIONS: Session[] = [
-  { id: "haeun-0815-1400", hallId: "haeun", date: "2026. 8. 15.", shortDate: "8월 15일", time: "14:00", endTime: "16:00", event: "2026 여름음악회", round: "1회차", status: "종료", statusTone: "neutral", distributed: 680, entered: 661 },
-  { id: "haeun-0815-1900", hallId: "haeun", date: "2026. 8. 15.", shortDate: "8월 15일", time: "19:00", endTime: "21:00", event: "2026 여름음악회", round: "2회차", status: "입장 준비", statusTone: "ready", distributed: 612, entered: 438 },
-  { id: "art-0820-1000", hallId: "art", date: "2026. 8. 20.", shortDate: "8월 20일", time: "10:00", endTime: "12:00", event: "신입생 오리엔테이션", round: "오전 회차", status: "입장 진행", statusTone: "live", distributed: 342, entered: 211 },
-  { id: "art-0820-1400", hallId: "art", date: "2026. 8. 20.", shortDate: "8월 20일", time: "14:00", endTime: "16:00", event: "신입생 오리엔테이션", round: "오후 회차", status: "배분 진행", statusTone: "ready", distributed: 298, entered: 0 },
-  { id: "yerang-0822-1100", hallId: "yerang", date: "2026. 8. 22.", shortDate: "8월 22일", time: "11:00", endTime: "13:00", event: "학부모 설명회", round: "1회차", status: "입장 준비", statusTone: "ready", distributed: 186, entered: 0 },
-];
+const CatalogContext = createContext<CatalogContextValue>({
+  halls: FALLBACK_HALLS,
+  sessions: FALLBACK_SESSIONS,
+  dataSource: "fallback",
+});
+
+function useCatalog() {
+  return useContext(CatalogContext);
+}
 
 const RECENT: Activity[] = [
   ["19:28:42", "김하은", "1층 R-21", "입장 완료"],
@@ -273,22 +260,24 @@ function BrandLockup() {
 }
 
 function HallSelectView({ onSelect }: { onSelect: (hall: Hall) => void }) {
+  const { halls, dataSource } = useCatalog();
   return <main className="selection-shell">
     <header className="selection-topbar"><BrandLockup/><div className="selection-user"><span className="user-avatar">김</span><div><strong>김하은</strong><small>현장 운영 담당자</small></div></div></header>
     <section className="selection-content">
       <div className="selection-intro"><p className="eyebrow">오늘의 현장 운영</p><h1>운영할 홀을 선택하세요</h1><p>홀을 선택하면 해당 홀에 등록된 행사와 회차만 표시됩니다.</p></div>
       <div className="hall-card-grid">
-        {HALLS.map((hall,index)=><button className="hall-card" key={hall.id} onClick={()=>onSelect(hall)}>
+        {halls.map((hall,index)=><button className="hall-card" key={hall.id} onClick={()=>onSelect(hall)}>
           <span className="hall-index">0{index+1}</span><div><strong>{hall.name}</strong><p>{hall.floors}</p></div><div className="hall-capacity"><strong>{hall.capacity}</strong><span>석</span></div><small>{hall.note}</small><em>행사 조회</em>
         </button>)}
       </div>
-      <aside className="selection-note"><strong>홀별 운영 원칙</strong><span>선택한 홀의 행사·좌석·입장·QR 정보만 독립적으로 관리합니다.</span></aside>
+      <aside className="selection-note"><strong>{dataSource === "supabase" ? "Supabase 데이터 연결됨" : "오프라인 미리보기"}</strong><span>선택한 홀의 행사·좌석·입장·QR 정보만 독립적으로 관리합니다.</span></aside>
     </section>
   </main>;
 }
 
 function EventSelectView({ hall, onBack, onSelect }: { hall: Hall; onBack: () => void; onSelect: (session: Session) => void }) {
-  const sessions=SESSIONS.filter(item=>item.hallId===hall.id);
+  const { sessions: allSessions } = useCatalog();
+  const sessions=allSessions.filter(item=>item.hallId===hall.id);
   const dates=[...new Set(sessions.map(item=>item.shortDate))];
   return <main className="selection-shell">
     <header className="selection-topbar"><BrandLockup/><button className="ghost-button" onClick={onBack}>전체 홀로</button></header>
@@ -315,22 +304,24 @@ function OperationContextBar({ hall, session, onHome, onHall, onChange }: { hall
 }
 
 function ChangeContextModal({ currentHall, currentSession, onClose, onApply }: { currentHall: Hall; currentSession: Session; onClose: () => void; onApply: (hall: Hall, session: Session) => void }) {
+  const { halls, sessions } = useCatalog();
   const [hallId,setHallId]=useState(currentHall.id);
-  const available=SESSIONS.filter(item=>item.hallId===hallId);
+  const available=sessions.filter(item=>item.hallId===hallId);
   const [sessionId,setSessionId]=useState(currentSession.id);
-  const chooseHall=(id: HallId)=>{setHallId(id);setSessionId(SESSIONS.find(item=>item.hallId===id)?.id??'');};
+  const chooseHall=(id: HallId)=>{setHallId(id);setSessionId(sessions.find(item=>item.hallId===id)?.id??'');};
   return <div className="modal-backdrop" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
     <section className="context-modal" role="dialog" aria-modal="true" aria-labelledby="context-modal-title">
       <div className="modal-heading"><div><p className="eyebrow">운영 대상 전환</p><h2 id="context-modal-title">홀·행사 변경</h2><p>선택한 회차를 기준으로 모든 메뉴의 정보가 바뀝니다.</p></div><button className="modal-close" onClick={onClose}>닫기</button></div>
-      <div className="modal-section"><strong>홀</strong><div className="hall-tabs">{HALLS.map(hall=><button className={hallId===hall.id?'active':''} key={hall.id} onClick={()=>chooseHall(hall.id)}>{hall.name}<small>{hall.capacity}석</small></button>)}</div></div>
+      <div className="modal-section"><strong>홀</strong><div className="hall-tabs">{halls.map(hall=><button className={hallId===hall.id?'active':''} key={hall.id} onClick={()=>chooseHall(hall.id)}>{hall.name}<small>{hall.capacity}석</small></button>)}</div></div>
       <div className="modal-section"><strong>행사·회차</strong><div className="modal-session-list">{available.map(session=><button className={sessionId===session.id?'active':''} key={session.id} onClick={()=>setSessionId(session.id)}><span>{session.shortDate}<strong>{session.time}</strong></span><div><strong>{session.event}</strong><small>{session.round} · {session.status}</small></div></button>)}</div></div>
-      <div className="modal-footer"><button className="ghost-button" onClick={onClose}>취소</button><button className="primary-button" onClick={()=>{const target=SESSIONS.find(item=>item.id===sessionId);const targetHall=target?HALLS.find(item=>item.id===target.hallId):undefined;if(target&&targetHall)onApply(targetHall,target);}}>선택한 행사로 이동</button></div>
+      <div className="modal-footer"><button className="ghost-button" onClick={onClose}>취소</button><button className="primary-button" onClick={()=>{const target=sessions.find(item=>item.id===sessionId);const targetHall=target?halls.find(item=>item.id===target.hallId):undefined;if(target&&targetHall)onApply(targetHall,target);}}>선택한 행사로 이동</button></div>
     </section>
   </div>;
 }
 
 function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description?: string }) {
-  return <header className="page-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{description && <p className="page-description">{description}</p>}</div><div className="connection"><span />실시간 연결됨</div></header>;
+  const { dataSource } = useCatalog();
+  return <header className="page-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{description && <p className="page-description">{description}</p>}</div><div className="connection"><span />{dataSource === "supabase" ? "Supabase 연결됨" : "미리보기 데이터"}</div></header>;
 }
 
 function DashboardView({ onNavigate, hall, session }: { onNavigate: (menu: MenuId) => void; hall: Hall; session: Session }) {
@@ -414,7 +405,8 @@ function HistoryView({ hall, session }: { hall: Hall; session: Session }) {
 }
 
 function EventManagementView({ hall, onChangeContext }: { hall: Hall; onChangeContext: () => void }) {
-  const sessions=SESSIONS.filter(item=>item.hallId===hall.id);
+  const { sessions: allSessions } = useCatalog();
+  const sessions=allSessions.filter(item=>item.hallId===hall.id);
   return <div className="view"><PageHeader eyebrow={`${hall.name} 관리자 기능`} title="행사 관리" description="행사와 날짜·시간별 운영 회차를 등록하고 관리합니다."/><section className="content-card"><div className="section-title"><div><h2>{hall.name} 등록 행사</h2><p>같은 홀의 시간이 겹치는 회차는 등록할 수 없습니다.</p></div><button className="primary-button">새 행사 등록</button></div><div className="management-list">{sessions.map(session=><article key={session.id}><div className="management-date"><strong>{session.shortDate}</strong><span>{session.time}~{session.endTime}</span></div><div><span className={`session-status session-status--${session.statusTone}`}>{session.status}</span><h3>{session.event}</h3><p>{session.round} · 배부 {session.distributed}석 · 입장 {session.entered}석</p></div><button className="secondary-button" onClick={onChangeContext}>운영 화면으로</button></article>)}</div></section></div>;
 }
 
@@ -445,7 +437,7 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,confir
   </div>;
 }
 
-export function SeatManagerApp() {
+function SeatManagerAppInner() {
   const [hall,setHall]=useState<Hall | null>(null);
   const [session,setSession]=useState<Session | null>(null);
   const [changeOpen,setChangeOpen]=useState(false);
@@ -463,4 +455,8 @@ export function SeatManagerApp() {
   if(!session)return <EventSelectView hall={hall} onBack={goHome} onSelect={openSession}/>;
   const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={session}/>;if(active==='allocation')return <AllocationView/>;if(active==='entry')return <EntryView/>;if(active==='scan')return <ScanView/>;if(active==='generate')return <GenerateView hall={hall} session={session}/>;if(active==='reassign')return <ReassignView hall={hall}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall}}/>;};
   return <main className="tablet-shell"><aside className="sidebar"><button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button><div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div><nav aria-label="주요 메뉴">{MENU.map(([id,label])=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><span>{String(MENU.findIndex(item=>item[0]===id)+1).padStart(2,'0')}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div><span className="user-avatar">김</span><p><strong>김하은</strong><small>중앙입구 담당자</small></p></div><button>시스템 설정</button></div></aside><section className="workspace workspace--context"><OperationContextBar hall={hall} session={session} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/><div className="workspace-content">{render()}</div></section>{changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>}</main>;
+}
+
+export function SeatManagerApp({ initialHalls = FALLBACK_HALLS, initialSessions = FALLBACK_SESSIONS, dataSource = "fallback" }: { initialHalls?: Hall[]; initialSessions?: Session[]; dataSource?: "supabase" | "fallback" }) {
+  return <CatalogContext.Provider value={{ halls: initialHalls, sessions: initialSessions, dataSource }}><SeatManagerAppInner /></CatalogContext.Provider>;
 }

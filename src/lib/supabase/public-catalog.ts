@@ -12,6 +12,7 @@ type HallRow = {
 };
 
 type SessionRow = {
+  event_id: number;
   session_code: string;
   hall_id: number;
   round_name: string;
@@ -56,7 +57,7 @@ export async function loadPublicCatalog(): Promise<{ halls: Hall[]; sessions: Se
   const supabase = await createClient();
   const [{ data: hallData, error: hallError }, { data: sessionData, error: sessionError }] = await Promise.all([
     supabase.from("halls").select("id, code, name, floor_summary, capacity, note").eq("is_active", true).order("display_order"),
-    supabase.from("event_sessions").select("session_code, hall_id, round_name, starts_at, ends_at, status, events!inner(name)").order("starts_at"),
+    supabase.from("event_sessions").select("event_id, session_code, hall_id, round_name, starts_at, ends_at, status, events!inner(name)").order("starts_at"),
   ]);
 
   if (hallError) throw hallError;
@@ -69,7 +70,7 @@ export async function loadPublicCatalog(): Promise<{ halls: Hall[]; sessions: Se
     name: hall.name,
     floors: hall.floor_summary,
     capacity: hall.capacity,
-    note: hall.note,
+    note: `등록 행사 ${new Set(((sessionData ?? []) as SessionRow[]).filter((session) => session.hall_id === hall.id).map((session) => session.event_id)).size}건`,
   }));
 
   const sessions = ((sessionData ?? []) as SessionRow[]).flatMap((session) => {
@@ -81,6 +82,7 @@ export async function loadPublicCatalog(): Promise<{ halls: Hall[]; sessions: Se
     const event = Array.isArray(session.events) ? session.events[0] : session.events;
     return [{
       id: session.session_code,
+      eventId: session.event_id,
       hallId,
       date: start.date,
       shortDate: start.shortDate,

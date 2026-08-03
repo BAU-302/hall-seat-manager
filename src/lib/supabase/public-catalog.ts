@@ -12,6 +12,7 @@ type HallRow = {
 };
 
 type SessionRow = {
+  id: number;
   event_id: number;
   session_code: string;
   hall_id: number;
@@ -55,13 +56,20 @@ function dateParts(value: string) {
 
 export async function loadPublicCatalog(): Promise<{ halls: Hall[]; sessions: Session[] }> {
   const supabase = await createClient();
-  const [{ data: hallData, error: hallError }, { data: sessionData, error: sessionError }] = await Promise.all([
+  const { data: authData } = await supabase.auth.getUser();
+  const [{ data: hallData, error: hallError }, { data: sessionData, error: sessionError }, allocationResult] = await Promise.all([
     supabase.from("halls").select("id, code, name, floor_summary, capacity, note").eq("is_active", true).order("display_order"),
-    supabase.from("event_sessions").select("event_id, session_code, hall_id, round_name, starts_at, ends_at, status, events!inner(name)").order("starts_at"),
+    supabase.from("event_sessions").select("id, event_id, session_code, hall_id, round_name, starts_at, ends_at, status, events!inner(name)").order("starts_at"),
+    authData.user
+      ? supabase.from("session_seats").select("session_id, allocation_status, admission_status")
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (hallError) throw hallError;
   if (sessionError) throw sessionError;
+  if (allocationResult.error) throw allocationResult.error;
+
+  const allocationRows = allocationResult.data ?? [];
 
   const rows = (hallData ?? []) as Array<HallRow & { id: number }>;
   const hallCodeById = new Map(rows.map((hall) => [hall.id, hall.code as HallId]));
@@ -82,6 +90,7 @@ export async function loadPublicCatalog(): Promise<{ halls: Hall[]; sessions: Se
     const event = Array.isArray(session.events) ? session.events[0] : session.events;
     return [{
       id: session.session_code,
+      sessionId: session.id,
       eventId: session.event_id,
       hallId,
       date: start.date,
@@ -92,8 +101,8 @@ export async function loadPublicCatalog(): Promise<{ halls: Hall[]; sessions: Se
       round: session.round_name,
       status: status.label,
       statusTone: status.tone,
-      distributed: 0,
-      entered: 0,
+      distributed: allocationRows.filter((seat) => seat.session_id === session.id && seat.allocation_status === "distributed").length,
+      entered: allocationRows.filter((seat) => seat.session_id === session.id && seat.admission_status === "entered").length,
     } satisfies Session];
   });
 

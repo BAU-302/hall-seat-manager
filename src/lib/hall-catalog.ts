@@ -12,6 +12,7 @@ export type SessionTone = "neutral" | "ready" | "live";
 
 export type Session = {
   id: string;
+  sessionId: number;
   eventId: number;
   hallId: HallId;
   date: string;

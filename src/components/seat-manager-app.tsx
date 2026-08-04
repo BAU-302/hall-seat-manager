@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
+import Image from "next/image";
 import { FALLBACK_HALLS, FALLBACK_SESSIONS } from "@/lib/hall-catalog";
 import type { Hall, HallId, Session } from "@/lib/hall-catalog";
 import { createClient } from "@/lib/supabase/client";
@@ -239,6 +240,8 @@ const MENU: Array<[MenuId, string]> = [
   ["history", "처리 이력"],
   ["events", "행사 관리"],
 ];
+const ENTRANCE_MENU_IDS=new Set<MenuId>(["dashboard","seats","entry","scan","history"]);
+const ROLE_LABEL:Record<string,string>={super_admin:"최고 관리자",event_manager:"행사 관리자",entrance_staff:"입장 직원"};
 
 type CatalogContextValue = {
   halls: Hall[];
@@ -246,6 +249,7 @@ type CatalogContextValue = {
   dataSource: "supabase" | "fallback";
   user: User | null;
   profile: { displayName: string; role: string } | null;
+  accessibleHallCodes: HallId[] | null;
   requestAuth: () => void;
   signOut: () => Promise<void>;
 };
@@ -256,6 +260,7 @@ const CatalogContext = createContext<CatalogContextValue>({
   dataSource: "fallback",
   user: null,
   profile: null,
+  accessibleHallCodes: null,
   requestAuth: () => undefined,
   signOut: async () => undefined,
 });
@@ -279,7 +284,7 @@ function AuthControl() {
   const { user, profile, requestAuth, signOut } = useCatalog();
   if (!user) return <button className="ghost-button" onClick={requestAuth}>직원 로그인</button>;
   const name = profile?.displayName || user.email?.split("@")[0] || "직원";
-  return <div className="selection-user"><span className="user-avatar">{name.slice(0, 1)}</span><div><strong>{name}</strong><small>{profile?.role === "super_admin" ? "최고 관리자" : "현장 운영 직원"}</small></div><button className="text-button" onClick={() => void signOut()}>로그아웃</button></div>;
+  return <div className="selection-user"><span className="user-avatar">{name.slice(0, 1)}</span><div><strong>{name}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></div><button className="text-button" onClick={() => void signOut()}>로그아웃</button></div>;
 }
 
 function AuthModal({ onClose }: { onClose: () => void }) {
@@ -312,7 +317,7 @@ function AuthModal({ onClose }: { onClose: () => void }) {
     }
     setBusy(false);
   };
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="context-modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title"><div className="modal-heading"><div><p className="eyebrow">내부 직원 전용</p><h2 id="auth-title">{mode === "login" ? "직원 로그인" : "첫 직원 계정 만들기"}</h2><p>처음 가입한 계정은 초기 최고 관리자로 설정됩니다.</p></div><button className="modal-close" onClick={onClose}>닫기</button></div><form className="auth-form" onSubmit={submit}>{mode === "signup" && <label className="form-field"><span>이름</span><input name="displayName" placeholder="예: 김하은" required /></label>}<label className="form-field"><span>이메일</span><input name="email" type="email" autoComplete="email" required /></label><label className="form-field"><span>비밀번호</span><input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={8} required /></label>{message && <div className="notice notice--error">{message}</div>}<button className="primary-button" disabled={busy}>{busy ? "처리 중…" : mode === "login" ? "로그인" : "계정 만들기"}</button></form><button className="auth-switch" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setMessage(""); }}>{mode === "login" ? "처음 사용하시나요? 계정 만들기" : "이미 계정이 있나요? 로그인"}</button></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="context-modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title"><div className="modal-heading"><div><p className="eyebrow">내부 직원 전용</p><h2 id="auth-title">{mode === "login" ? "직원 로그인" : "직원 계정 만들기"}</h2><p>첫 계정만 최고 관리자가 되며, 이후 계정은 관리자가 역할과 운영 홀을 지정합니다.</p></div><button className="modal-close" onClick={onClose}>닫기</button></div><form className="auth-form" onSubmit={submit}>{mode === "signup" && <label className="form-field"><span>이름</span><input name="displayName" placeholder="예: 김하은" required /></label>}<label className="form-field"><span>이메일</span><input name="email" type="email" autoComplete="email" required /></label><label className="form-field"><span>비밀번호</span><input name="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={8} required /></label>{message && <div className="notice notice--error">{message}</div>}<button className="primary-button" disabled={busy}>{busy ? "처리 중…" : mode === "login" ? "로그인" : "계정 만들기"}</button></form><button className="auth-switch" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setMessage(""); }}>{mode === "login" ? "처음 사용하시나요? 계정 만들기" : "이미 계정이 있나요? 로그인"}</button></section></div>;
 }
 
 function NewEventModal({ hall, onClose }: { hall: Hall; onClose: () => void }) {
@@ -347,15 +352,17 @@ function NewEventModal({ hall, onClose }: { hall: Hall; onClose: () => void }) {
 }
 
 function HallSelectView({ onSelect }: { onSelect: (hall: Hall) => void }) {
-  const { halls, sessions, dataSource } = useCatalog();
+  const { halls, sessions, dataSource, profile, accessibleHallCodes } = useCatalog();
+  const visibleHalls=profile&&profile.role!=="super_admin"?halls.filter((hall)=>accessibleHallCodes?.includes(hall.id)):halls;
   return <main className="selection-shell">
     <header className="selection-topbar"><BrandLockup/><AuthControl/></header>
     <section className="selection-content">
       <div className="selection-intro"><p className="eyebrow">오늘의 현장 운영</p><h1>운영할 홀을 선택하세요</h1><p>홀을 선택하면 해당 홀에 등록된 행사와 회차만 표시됩니다.</p></div>
       <div className="hall-card-grid">
-        {halls.map((hall,index)=><button className="hall-card" key={hall.id} onClick={()=>onSelect(hall)}>
+        {visibleHalls.map((hall,index)=><button className="hall-card" key={hall.id} onClick={()=>onSelect(hall)}>
           <span className="hall-index">0{index+1}</span><div><strong>{hall.name}</strong><p>{hall.floors}</p></div><div className="hall-capacity"><strong>{hall.capacity}</strong><span>석</span></div><small>등록 행사 {new Set(sessions.filter((session) => session.hallId === hall.id).map((session) => session.eventId)).size}건</small><em>행사 조회</em>
         </button>)}
+        {!visibleHalls.length&&profile&&<div className="empty-state event-empty"><strong>배정된 홀이 없습니다</strong><p>최고 관리자에게 운영할 홀 권한을 요청해 주세요.</p></div>}
       </div>
       <aside className="selection-note"><strong>{dataSource === "supabase" ? "Supabase 데이터 연결됨" : "오프라인 미리보기"}</strong><span>선택한 홀의 행사·좌석·입장·QR 정보만 독립적으로 관리합니다.</span></aside>
     </section>
@@ -381,7 +388,7 @@ function EventSelectView({ hall, onBack, onSelect }: { hall: Hall; onBack: () =>
         </article>)}
       </div>
       {message && <div className="notice notice--error">{message}</div>}
-      <button className="new-event-card" onClick={() => user ? setCreateOpen(true) : requestAuth()}>새 행사 또는 회차 등록</button>
+      {profile?.role!=="entrance_staff"&&<button className="new-event-card" onClick={() => user ? setCreateOpen(true) : requestAuth()}>새 행사 또는 회차 등록</button>}
     </section>
     {createOpen && <NewEventModal hall={hall} onClose={() => setCreateOpen(false)}/>}
   </main>;
@@ -396,7 +403,8 @@ function OperationContextBar({ hall, session, onHome, onHall, onChange }: { hall
 }
 
 function ChangeContextModal({ currentHall, currentSession, onClose, onApply }: { currentHall: Hall; currentSession: Session; onClose: () => void; onApply: (hall: Hall, session: Session) => void }) {
-  const { halls, sessions } = useCatalog();
+  const { halls: allHalls, sessions, profile, accessibleHallCodes } = useCatalog();
+  const halls=profile&&profile.role!=="super_admin"?allHalls.filter((hall)=>accessibleHallCodes?.includes(hall.id)):allHalls;
   const [hallId,setHallId]=useState(currentHall.id);
   const available=sessions.filter(item=>item.hallId===hallId);
   const [sessionId,setSessionId]=useState(currentSession.id);
@@ -417,6 +425,7 @@ function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: s
 }
 
 function DashboardView({ onNavigate, hall, session }: { onNavigate: (menu: MenuId) => void; hall: Hall; session: Session }) {
+  const { profile }=useCatalog();
   const capacity=hall.capacity;
   const unused=Math.max(capacity-session.distributed,0);
   const waiting=Math.max(session.distributed-session.entered,0);
@@ -429,14 +438,10 @@ function DashboardView({ onNavigate, hall, session }: { onNavigate: (menu: MenuI
     </section>
     <section className="dashboard-grid">
       <article className="content-card progress-card"><div className="section-title"><div><h2>{hall.id==='haeun'?'층별 입장 진행률':'입장 진행률'}</h2><p>현재 선택 회차의 실시간 기준</p></div><button className="text-button" onClick={()=>onNavigate('seats')}>좌석표 보기</button></div>{hall.id==='haeun'?<><div className="floor-progress"><strong>1층</strong><div><i style={{width:'0%'}} /></div><span>0 / 506</span></div><div className="floor-progress"><strong>2층</strong><div><i style={{width:'0%'}} /></div><span>0 / 188</span></div></>:<div className="floor-progress"><strong>1층</strong><div><i style={{width:enteredRate}} /></div><span>{session.entered} / {capacity}</span></div>}<p className="unused-copy">현재 미배분 좌석 {unused}석</p></article>
-      <article className="content-card quick-card"><div className="section-title"><div><h2>빠른 실행</h2><p>현장 업무를 바로 시작하세요.</p></div></div><div className="quick-actions"><button onClick={()=>onNavigate('allocation')}>새 좌석 배분</button><button onClick={()=>onNavigate('scan')}>QR 빠른 스캔</button><button onClick={()=>onNavigate('generate')}>QR 생성</button><button onClick={()=>onNavigate('reassign')}>빈 좌석 재배정</button></div></article>
+      <article className="content-card quick-card"><div className="section-title"><div><h2>빠른 실행</h2><p>현장 업무를 바로 시작하세요.</p></div></div><div className="quick-actions">{profile?.role!=="entrance_staff"&&<button onClick={()=>onNavigate('allocation')}>새 좌석 배분</button>}<button onClick={()=>onNavigate('entry')}>수동 입장</button><button onClick={()=>onNavigate('scan')}>QR 빠른 스캔</button>{profile?.role!=="entrance_staff"&&<button onClick={()=>onNavigate('generate')}>QR 생성</button>}</div></article>
       <article className="content-card recent-card"><div className="section-title"><div><h2>최근 입장 내역</h2><p>{hall.name}에서 방금 처리된 좌석입니다.</p></div><button className="text-button" onClick={()=>onNavigate('history')}>전체 보기</button></div>{recent.length ? <div className="activity-list">{recent.map(item=><div key={item[0]}><time>{item[0]}</time><strong>{item[1]}</strong><span>{item[2]}</span><em>{item[3]}</em></div>)}</div> : <div className="compact-empty">아직 처리된 입장 기록이 없습니다.</div>}</article>
     </section>
   </div>;
-}
-
-function FormField({ label, placeholder, defaultValue }: { label: string; placeholder?: string; defaultValue?: string }) {
-  return <label className="form-field"><span>{label}</span><input placeholder={placeholder} defaultValue={defaultValue} /></label>;
 }
 
 type AllocationSeat = {
@@ -450,6 +455,7 @@ type AllocationSeat = {
 
 type AllocationRecord = {
   seat_id: number;
+  ticket_code: string | null;
   allocation_status: string;
   admission_status: string;
   assignee_name: string | null;
@@ -468,7 +474,7 @@ async function fetchAllocationData(hallId: HallId, sessionId: number, canReadAll
   const [{data:seatData,error:seatError},{data:allocationData,error:allocationError}]=await Promise.all([
     supabase.from("seats").select("id, seat_code, row_label, seat_number, hall_floors!inner(floor_code, name, halls!inner(code))").eq("is_active",true).order("seat_number"),
     canReadAllocations
-      ? supabase.from("session_seats").select("seat_id, allocation_status, admission_status, assignee_name, group_name, contact, note, allocated_at, admitted_at, entrance_name").eq("session_id",sessionId)
+      ? supabase.from("session_seats").select("seat_id, ticket_code, allocation_status, admission_status, assignee_name, group_name, contact, note, allocated_at, admitted_at, entrance_name").eq("session_id",sessionId)
       : Promise.resolve({data:[],error:null}),
   ]);
   if(seatError||allocationError)throw (seatError??allocationError);
@@ -480,6 +486,7 @@ async function fetchAllocationData(hallId: HallId, sessionId: number, canReadAll
     if(!hallRaw||typeof hallRaw!=="object"||(hallRaw as {code:string}).code!==hallId)return [];
     return [{id:seat.id,floorCode:floor.floor_code,floorName:floor.name,row:seat.row_label,number:seat.seat_number,label:`${floor.floor_code}-${seat.row_label}-${String(seat.seat_number).padStart(2,"0")}`}];
   });
+  seats.sort((a,b)=>a.floorCode.localeCompare(b.floorCode)||a.row.localeCompare(b.row)||a.number-b.number);
   return {seats,records:(allocationData??[]) as AllocationRecord[]};
 }
 
@@ -657,7 +664,7 @@ function EntryView({ hall, session, onStats }: { hall: Hall; session: Session; o
   const selectedItems=distributed.filter((item)=>picked.includes(item.seat.id));
   const changeMode=(next:"admit"|"undo")=>{setMode(next);setPicked([]);setMessage(null);};
   const toggleGroup=(items:ManagedAllocation[])=>{const ids=items.filter(eligible).map((item)=>item.seat.id);const allSelected=ids.length>0&&ids.every((id)=>picked.includes(id));setPicked((current)=>allSelected?current.filter((id)=>!ids.includes(id)):[...new Set([...current,...ids])]);};
-  const submit=async()=>{if(!user){requestAuth();return;}if(!picked.length){setMessage({tone:"error",text:mode==="admit"?"입장 처리할 좌석을 선택해 주세요.":"입장을 취소할 좌석을 선택해 주세요."});return;}if(mode==="undo"&&!window.confirm(`선택한 ${picked.length}석의 입장 처리를 취소할까요?\n취소 이력은 감사 로그에 보존됩니다.`))return;setBusy(true);setMessage(null);const client=createClient();const response=mode==="admit"?await client.rpc("admit_session_seats",{p_session_code:session.id,p_seat_ids:picked,p_entrance_name:entrance.trim()||"정문"}):await client.rpc("undo_session_admissions",{p_session_code:session.id,p_seat_ids:picked,p_reason:reason.trim()||"입장 관리 화면에서 취소"});if(response.error){setMessage({tone:"error",text:response.error.message});setBusy(false);return;}const count=Number(response.data??picked.length);setPicked([]);setReason("");setMessage({tone:"success",text:mode==="admit"?`${count}석의 입장이 완료되었습니다.`:`${count}석의 입장이 취소되었습니다.`});await load();setBusy(false);};
+  const submit=async()=>{if(!user){requestAuth();return;}if(!picked.length){setMessage({tone:"error",text:mode==="admit"?"입장 처리할 좌석을 선택해 주세요.":"입장을 취소할 좌석을 선택해 주세요."});return;}if(mode==="undo"&&!window.confirm(`선택한 ${picked.length}석의 입장 처리를 취소할까요?\n취소 이력은 감사 로그에 보존됩니다.`))return;setBusy(true);setMessage(null);const response=await createClient().rpc("operate_session_admissions",{p_session_code:session.id,p_seat_ids:picked,p_mode:mode,p_entrance_name:entrance.trim()||"정문",p_reason:reason.trim()||"입장 관리 화면에서 취소"});if(response.error){setMessage({tone:"error",text:response.error.message});setBusy(false);return;}const count=Number(response.data??picked.length);setPicked([]);setReason("");setMessage({tone:"success",text:mode==="admit"?`${count}석의 입장이 완료되었습니다.`:`${count}석의 입장이 취소되었습니다.`});await load();setBusy(false);};
   if(hall.id!=="haeun")return <div className="view"><PageHeader eyebrow="입장 운영" title="입장 관리" description={`${hall.name} 좌석 도면 등록 후 사용할 수 있습니다.`}/><div className="empty-state content-card"><strong>좌석 도면 준비 중</strong><p>실제 좌석이 등록되면 입장 검색과 처리를 사용할 수 있습니다.</p></div></div>;
   return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="입장 관리" description="좌석번호·이름·단체명으로 검색하고, 좌석별 또는 단체 전체를 한 번에 처리합니다." />
     <div className="qr-mode-tabs allocation-workflow-tabs"><button type="button" className={mode==="admit"?"active":""} onClick={()=>changeMode("admit")}>입장 처리</button><button type="button" className={mode==="undo"?"active":""} onClick={()=>changeMode("undo")}>입장 취소</button></div>
@@ -685,7 +692,7 @@ function ScanView({ hall, session, onStats }: { hall: Hall; session: Session; on
   const stopCamera=()=>{controlsRef.current?.stop();controlsRef.current=null;setCameraActive(false);};
   useEffect(()=>()=>{controlsRef.current?.stop();},[]);
   const refreshStats=async()=>{const current=await fetchAllocationData(hall.id,session.sessionId,true);onStats(current.records.filter((record)=>record.allocation_status==="distributed").length,current.records.filter((record)=>record.admission_status==="entered").length);};
-  const processTicket=async(rawCode:string)=>{const code=rawCode.trim();if(processingRef.current||!code)return;if(!user){requestAuth();return;}processingRef.current=true;setBusy(true);setMessage(null);setResult(null);const {data,error}=await createClient().rpc("admit_session_ticket",{p_session_code:session.id,p_ticket_code:code,p_entrance_name:entrance.trim()||"정문"});if(error){setMessage({tone:"error",text:error.message});processingRef.current=false;setBusy(false);return;}const admitted=data as TicketAdmissionResult;setResult(admitted);setManualCode("");setMessage({tone:"success",text:`${admitted.seat_code} 좌석 입장이 완료되었습니다.`});stopCamera();try{await refreshStats();}catch{setMessage({tone:"success",text:`${admitted.seat_code} 입장은 완료되었습니다. 현황은 화면을 새로고침하면 반영됩니다.`});}processingRef.current=false;setBusy(false);};
+  const processTicket=async(rawCode:string)=>{const code=rawCode.trim();if(processingRef.current||!code)return;if(!user){requestAuth();return;}processingRef.current=true;setBusy(true);setMessage(null);setResult(null);const {data,error}=await createClient().rpc("operate_session_ticket",{p_session_code:session.id,p_ticket_code:code,p_entrance_name:entrance.trim()||"정문"});if(error){setMessage({tone:"error",text:error.message});processingRef.current=false;setBusy(false);return;}const admitted=data as TicketAdmissionResult;setResult(admitted);setManualCode("");setMessage({tone:"success",text:`${admitted.seat_code} 좌석 입장이 완료되었습니다.`});stopCamera();try{await refreshStats();}catch{setMessage({tone:"success",text:`${admitted.seat_code} 입장은 완료되었습니다. 현황은 화면을 새로고침하면 반영됩니다.`});}processingRef.current=false;setBusy(false);};
   const startCamera=async()=>{if(!user){requestAuth();return;}if(!navigator.mediaDevices?.getUserMedia){setMessage({tone:"error",text:"이 브라우저에서는 카메라를 사용할 수 없습니다. 아래 코드 입력을 이용해 주세요."});return;}setMessage(null);setResult(null);try{const { BrowserQRCodeReader }=await import("@zxing/browser");if(!videoRef.current)return;const reader=new BrowserQRCodeReader();controlsRef.current=await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:"environment"}}},videoRef.current,(scanResult)=>{if(scanResult&&!processingRef.current)void processTicket(scanResult.getText());});setCameraActive(true);}catch(error){stopCamera();setMessage({tone:"error",text:error instanceof Error&&error.name==="NotAllowedError"?"카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라를 허용해 주세요.":"카메라를 시작하지 못했습니다. 코드 직접 입력을 이용해 주세요."});}};
   if(hall.id!=="haeun")return <div className="view"><PageHeader eyebrow="모바일 우선 기능" title="QR 스캔" description={`${hall.name} 좌석 도면과 티켓이 등록된 후 사용할 수 있습니다.`}/><div className="empty-state content-card"><strong>QR 운영 준비 중</strong><p>실제 좌석 등록 후 QR 입장을 연결합니다.</p></div></div>;
   return <div className="view view--scan"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="QR 빠른 입장" description="모바일 후면 카메라로 티켓을 읽으면 현재 회차의 좌석을 즉시 입장 처리합니다." />
@@ -695,12 +702,49 @@ function ScanView({ hall, session, onStats }: { hall: Hall; session: Session; on
   </div>;
 }
 
+type QrTarget = { seat: AllocationSeat; ticketCode: string; allocated: boolean };
+
+function downloadBrowserFile(content: Blob|string, fileName: string) {
+  const link=document.createElement("a");
+  link.href=typeof content==="string"?content:URL.createObjectURL(content);
+  link.download=fileName;document.body.appendChild(link);link.click();link.remove();
+  if(typeof content!=="string")setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+}
+
+function safeFilePart(value:string){return value.replace(/[\\/:*?"<>|]/g,"-").replace(/\s+/g,"_").slice(0,80);}
+
 function GenerateView({ hall, session }: { hall: Hall; session: Session }) {
-  const [mode,setMode]=useState('single');
-  const resetMode=(next: string)=>{setMode(next);};
-  return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.date} ${session.time}`} title="QR 생성" description="현재 회차의 개별·단체·전체 좌석 티켓을 생성합니다." />
-    <div className="qr-mode-tabs">{[['single','개별 생성'],['group','단체 생성'],['all','전체 좌석 생성']].map(([id,label])=><button className={mode===id?'active':''} key={id} onClick={()=>resetMode(id)}>{label}</button>)}</div>
-    {mode==='all'?<section className="split-layout"><article className="content-card form-card"><div className="section-title"><div><h2>현재 회차 전체 좌석</h2><p>행사에서 사용하는 좌석별 티켓을 한 번에 만듭니다.</p></div><span className="step-badge">{hall.capacity}</span></div><div className="bulk-summary"><div><span>홀</span><strong>{hall.name}</strong></div><div><span>행사</span><strong>{session.event} {session.round}</strong></div><div><span>생성 대상</span><strong>{hall.capacity}석</strong></div><div><span>파일 형식</span><strong>완성 티켓 PNG · ZIP</strong></div></div><label className="check-row"><input type="checkbox" defaultChecked/> 현재 회차에서 사용하는 전체 좌석</label><label className="check-row"><input type="checkbox" defaultChecked/> 층별 폴더로 분류</label><button className="primary-button" disabled>전체 좌석 QR 기능 연결 예정</button></article><article className="content-card bulk-preview"><span className="ticket-label">다운로드 미리보기</span><div className="zip-file"><strong>[{hall.name}][{session.date.replaceAll('. ','-').replace('.','')}_{session.time.replace(':','')}][{session.event}]</strong><span>전체티켓.zip</span></div><div className="file-tree"><strong>{hall.name}/</strong><span>1층/[{hall.name}][1층-A-01].png</span>{hall.id==='haeun'&&<span>2층/[{hall.name}][2층-A-04].png</span>}<span>… 좌석별 PNG 총 {hall.capacity}개</span></div><button className="secondary-button" disabled>ZIP 다운로드</button></article></section>:<section className="split-layout"><article className="content-card form-card"><div className="section-title"><div><h2>{mode==='group'?'단체 QR 정보':'개별 QR 정보'}</h2><p>현재 선택된 홀과 회차가 자동 적용됩니다.</p></div></div>{mode==='group'&&<FormField label="배부 대상" placeholder="단체명을 입력하세요"/>}<FormField label="좌석" placeholder="좌석을 선택하세요"/><FormField label="회차" defaultValue={`${session.date} ${session.time}`}/><button className="primary-button" disabled>좌석별 QR 기능 연결 예정</button></article><article className="content-card ticket-preview"><span className="ticket-label">{hall.name} 모바일 입장권</span><div className="empty-state"><strong>QR 미리보기</strong><p>실제 좌석 배분 데이터가 생기면 이곳에서 QR을 생성할 수 있습니다.</p></div></article></section>}
+  const { user, requestAuth }=useCatalog();
+  const [mode,setMode]=useState<"single"|"group"|"all">("single");
+  const [seats,setSeats]=useState<AllocationSeat[]>([]);
+  const [records,setRecords]=useState<Map<number,AllocationRecord>>(new Map());
+  const [selectedSeatId,setSelectedSeatId]=useState(0);
+  const [selectedGroup,setSelectedGroup]=useState("");
+  const [preview,setPreview]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [progress,setProgress]=useState(0);
+  const [message,setMessage]=useState<{tone:"success"|"error";text:string}|null>(null);
+  useEffect(()=>{let active=true;void fetchAllocationData(hall.id,session.sessionId,Boolean(user)).then((data)=>{if(!active)return;setSeats(data.seats);setRecords(new Map(data.records.map((record)=>[record.seat_id,record])));setSelectedSeatId((current)=>current||data.seats[0]?.id||0);}).catch((error:unknown)=>{if(active)setMessage({tone:"error",text:error instanceof Error?error.message:"좌석 정보를 불러오지 못했습니다."});});return()=>{active=false;};},[hall.id,session.sessionId,user]);
+  const groups=[...new Set([...records.values()].filter((record)=>record.allocation_status==="distributed"&&record.group_name).map((record)=>String(record.group_name)))].sort((a,b)=>a.localeCompare(b));
+  const effectiveGroup=selectedGroup||groups[0]||"";
+  const toTarget=(seat:AllocationSeat):QrTarget=>{const record=records.get(seat.id);return {seat,ticketCode:record?.ticket_code||`${session.id}:${seat.label}`,allocated:record?.allocation_status==="distributed"};};
+  const targets:QrTarget[]=mode==="single"?seats.filter((seat)=>seat.id===selectedSeatId).map(toTarget):mode==="group"?seats.filter((seat)=>records.get(seat.id)?.group_name===effectiveGroup&&records.get(seat.id)?.allocation_status==="distributed").map(toTarget):seats.map(toTarget);
+  const resetMode=(next:"single"|"group"|"all")=>{setMode(next);setPreview("");setProgress(0);setMessage(null);};
+  const createPreview=async()=>{if(!user){requestAuth();return;}const target=targets[0];if(!target){setMessage({tone:"error",text:"QR을 생성할 좌석이 없습니다."});return;}setBusy(true);setMessage(null);try{const QRCode=await import("qrcode");const url=await QRCode.toDataURL(target.ticketCode,{width:512,margin:2,errorCorrectionLevel:"M",color:{dark:"#24212a",light:"#ffffff"}});setPreview(url);setMessage({tone:"success",text:`${target.seat.label} QR 미리보기가 생성되었습니다.`});}catch{setMessage({tone:"error",text:"QR 이미지를 생성하지 못했습니다."});}setBusy(false);};
+  const downloadSingle=async()=>{if(!preview)await createPreview();const target=targets[0];if(!target)return;const QRCode=await import("qrcode");const url=preview||await QRCode.toDataURL(target.ticketCode,{width:1024,margin:2,errorCorrectionLevel:"M"});downloadBrowserFile(url,`[${safeFilePart(hall.name)}][${safeFilePart(target.seat.floorName)}-${target.seat.row}-${String(target.seat.number).padStart(2,"0")}].png`);};
+  const downloadZip=async()=>{if(!user){requestAuth();return;}if(!targets.length){setMessage({tone:"error",text:"ZIP으로 생성할 좌석이 없습니다."});return;}setBusy(true);setProgress(0);setMessage(null);try{const [{default:JSZip},QRCode]=await Promise.all([import("jszip"),import("qrcode")]);const zip=new JSZip();for(let index=0;index<targets.length;index+=1){const target=targets[index];const dataUrl=await QRCode.toDataURL(target.ticketCode,{width:512,margin:2,errorCorrectionLevel:"M"});const fileName=`[${safeFilePart(hall.name)}][${safeFilePart(target.seat.floorName)}-${target.seat.row}-${String(target.seat.number).padStart(2,"0")}].png`;zip.file(`${safeFilePart(target.seat.floorName)}/${fileName}`,dataUrl.split(",")[1],{base64:true});if(index%10===0||index===targets.length-1)setProgress(Math.round((index+1)/targets.length*80));}const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE"},(metadata)=>setProgress(80+Math.round(metadata.percent*.2)));const scope=mode==="group"?effectiveGroup:"전체좌석";downloadBrowserFile(blob,`[${safeFilePart(hall.name)}][${safeFilePart(session.event)}][${safeFilePart(scope)}].zip`);setProgress(100);setMessage({tone:"success",text:`좌석별 QR ${targets.length}개를 ZIP으로 만들었습니다.`});}catch{setMessage({tone:"error",text:"QR ZIP 파일을 생성하지 못했습니다."});}setBusy(false);};
+  if(hall.id!=="haeun")return <div className="view"><PageHeader eyebrow={`${hall.name} QR`} title="QR 생성" description="실제 좌석 도면 등록 후 사용할 수 있습니다."/><div className="empty-state content-card"><strong>좌석 도면 준비 중</strong><p>실제 좌석이 등록되면 좌석별 QR을 생성합니다.</p></div></div>;
+  const firstTarget=targets[0];
+  return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.date} ${session.time}`} title="QR 생성" description="현재 회차의 개별·단체·전체 좌석 QR을 PNG 또는 ZIP으로 내려받습니다." />
+    <div className="qr-mode-tabs">{([['single','개별 생성'],['group','단체 생성'],['all','전체 좌석 생성']] as const).map(([id,label])=><button className={mode===id?'active':''} key={id} onClick={()=>resetMode(id)}>{label}</button>)}</div>{message&&<p className={`allocation-message allocation-message--${message.tone}`} role="status">{message.text}</p>}{!user&&<button type="button" className="auth-notice" onClick={requestAuth}>QR 생성은 행사 관리자 로그인이 필요합니다. 로그인하기</button>}
+    <section className="split-layout qr-generation-layout"><article className="content-card form-card"><div className="section-title"><div><h2>{mode==="single"?"개별 좌석 QR":mode==="group"?"단체별 QR 묶음":"홀 전체 좌석 QR"}</h2><p>QR 안에는 현재 행사 회차와 좌석을 식별하는 티켓 코드가 들어갑니다.</p></div><span className="step-badge">{targets.length}</span></div>
+      {mode==="single"&&<label className="form-field"><span>좌석 선택</span><select value={selectedSeatId} onChange={(event)=>{setSelectedSeatId(Number(event.target.value));setPreview("");}}>{seats.map((seat)=><option key={seat.id} value={seat.id}>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")} {records.get(seat.id)?.allocation_status==="distributed"?"· 배분 완료":"· 미배분"}</option>)}</select></label>}
+      {mode==="group"&&<label className="form-field"><span>단체 선택</span><select value={effectiveGroup} onChange={(event)=>{setSelectedGroup(event.target.value);setPreview("");}}>{groups.map((group)=><option key={group}>{group}</option>)}</select></label>}
+      {mode==="all"&&<div className="bulk-summary"><div><span>홀</span><strong>{hall.name}</strong></div><div><span>행사</span><strong>{session.event}</strong></div><div><span>생성 대상</span><strong>{targets.length}석</strong></div><div><span>분류</span><strong>층별 폴더</strong></div></div>}
+      <div className="qr-generation-note"><strong>{mode==="single"&&firstTarget?.allocated?"바로 스캔 가능":mode==="group"?"배분 완료 좌석만 포함":"좌석 배분 후 스캔 가능"}</strong><p>{mode==="all"?"미리 인쇄할 수 있으며, 실제 입장은 해당 좌석이 배분된 후에만 허용됩니다.":"현재 회차에만 사용할 수 있는 QR입니다."}</p></div>
+      {busy&&mode!=="single"&&<div className="qr-progress"><span style={{width:`${progress}%`}}/><strong>{progress}%</strong></div>}
+      {mode==="single"?<><button className="secondary-button" disabled={busy||!firstTarget} onClick={()=>void createPreview()}>{busy?"QR 생성 중…":"QR 미리보기 생성"}</button><button className="primary-button" disabled={busy||!firstTarget} onClick={()=>void downloadSingle()}>PNG 다운로드</button></>:<button className="primary-button" disabled={busy||!targets.length} onClick={()=>void downloadZip()}>{busy?`QR 생성 중 ${progress}%`:`QR ${targets.length}개 ZIP 다운로드`}</button>}
+    </article><article className="content-card ticket-preview qr-ticket-preview"><span className="ticket-label">{hall.name} · {session.event}</span>{preview&&firstTarget?<><Image src={preview} alt={`${firstTarget.seat.label} QR 코드`} width={270} height={270} unoptimized/><h2>{firstTarget.seat.floorName} {firstTarget.seat.row}-{String(firstTarget.seat.number).padStart(2,"0")}</h2><strong>{firstTarget.allocated?records.get(firstTarget.seat.id)?.group_name||records.get(firstTarget.seat.id)?.assignee_name||"배분 완료":"미배분 좌석"}</strong><p>이 QR을 휴대폰 QR 스캔 화면에서 확인할 수 있습니다.</p></>:<div className="empty-state"><strong>{mode==="single"?"QR 미리보기":"ZIP 다운로드 준비"}</strong><p>{mode==="single"?"좌석을 선택하고 미리보기를 생성하세요.":`좌석별 PNG ${targets.length}개가 층별 폴더로 만들어집니다.`}</p></div>}</article></section>
   </div>;
 }
 
@@ -718,6 +762,21 @@ function EventManagementView({ hall, onChangeContext }: { hall: Hall; onChangeCo
   const { sessions: allSessions } = useCatalog();
   const sessions=allSessions.filter(item=>item.hallId===hall.id);
   return <div className="view"><PageHeader eyebrow={`${hall.name} 관리자 기능`} title="행사 관리" description="행사와 날짜·시간별 운영 회차를 등록하고 관리합니다."/><section className="content-card"><div className="section-title"><div><h2>{hall.name} 등록 행사</h2><p>같은 홀의 시간이 겹치는 회차는 등록할 수 없습니다.</p></div><button className="primary-button">새 행사 등록</button></div><div className="management-list">{sessions.map(session=><article key={session.id}><div className="management-date"><strong>{session.shortDate}</strong><span>{session.time}~{session.endTime}</span></div><div><span className={`session-status session-status--${session.statusTone}`}>{session.status}</span><h3>{session.event}</h3><p>{session.round} · 배부 {session.distributed}석 · 입장 {session.entered}석</p></div><button className="secondary-button" onClick={onChangeContext}>운영 화면으로</button></article>)}</div></section></div>;
+}
+
+type StaffPermission = { userId:string; displayName:string; role:"event_manager"|"entrance_staff"; hallCodes:HallId[] };
+
+function StaffSettingsModal({ onClose }: { onClose:()=>void }) {
+  const { halls }=useCatalog();
+  const [staff,setStaff]=useState<StaffPermission[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [saving,setSaving]=useState("");
+  const [message,setMessage]=useState<{tone:"success"|"error";text:string}|null>(null);
+  useEffect(()=>{let active=true;const client=createClient();void Promise.all([client.from("profiles").select("user_id, display_name, role").neq("role","super_admin").order("created_at"),client.from("staff_hall_access").select("user_id, halls!inner(code)")]).then(([profilesResult,accessResult])=>{if(!active)return;if(profilesResult.error||accessResult.error){setMessage({tone:"error",text:(profilesResult.error??accessResult.error)?.message||"직원 권한을 불러오지 못했습니다."});setLoading(false);return;}const accessByUser=new Map<string,HallId[]>();((accessResult.data??[]) as Array<{user_id:string;halls:unknown}>).forEach((item)=>{const hallRaw=Array.isArray(item.halls)?item.halls[0]:item.halls;if(!hallRaw||typeof hallRaw!=="object")return;const code=(hallRaw as {code:HallId}).code;accessByUser.set(item.user_id,[...(accessByUser.get(item.user_id)??[]),code]);});setStaff(((profilesResult.data??[]) as Array<{user_id:string;display_name:string;role:string}>).map((item)=>({userId:item.user_id,displayName:item.display_name,role:item.role==="event_manager"?"event_manager":"entrance_staff",hallCodes:accessByUser.get(item.user_id)??[]})));setLoading(false);});return()=>{active=false;};},[]);
+  const update=(userId:string,changes:Partial<StaffPermission>)=>setStaff((current)=>current.map((item)=>item.userId===userId?{...item,...changes}:item));
+  const toggleHall=(item:StaffPermission,hallCode:HallId)=>update(item.userId,{hallCodes:item.hallCodes.includes(hallCode)?item.hallCodes.filter((code)=>code!==hallCode):[...item.hallCodes,hallCode]});
+  const save=async(item:StaffPermission)=>{setSaving(item.userId);setMessage(null);const {error}=await createClient().rpc("configure_staff_access",{p_user_id:item.userId,p_role:item.role,p_hall_codes:item.hallCodes});if(error)setMessage({tone:"error",text:error.message});else setMessage({tone:"success",text:`${item.displayName} 직원의 권한을 저장했습니다.`});setSaving("");};
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event)=>{if(event.target===event.currentTarget)onClose();}}><section className="context-modal staff-settings-modal" role="dialog" aria-modal="true" aria-labelledby="staff-settings-title"><div className="modal-heading"><div><p className="eyebrow">최고 관리자 전용</p><h2 id="staff-settings-title">직원 권한 설정</h2><p>직원 역할과 운영할 홀을 지정합니다. 입장 직원은 배분 변경이나 QR 대량 생성을 할 수 없습니다.</p></div><button className="modal-close" onClick={onClose}>닫기</button></div>{message&&<p className={`allocation-message allocation-message--${message.tone}`} role="status">{message.text}</p>}{loading?<div className="compact-empty">직원 정보를 불러오는 중입니다.</div>:!staff.length?<div className="empty-state"><strong>설정할 직원이 없습니다</strong><p>직원이 계정을 만든 후 이 화면에서 역할과 홀을 지정할 수 있습니다.</p></div>:<div className="staff-permission-list">{staff.map((item)=><article key={item.userId}><div className="staff-permission-name"><span className="user-avatar">{item.displayName.slice(0,1)}</span><div><strong>{item.displayName}</strong><small>{ROLE_LABEL[item.role]}</small></div></div><label><span>역할</span><select value={item.role} onChange={(event)=>update(item.userId,{role:event.target.value as StaffPermission["role"]})}><option value="entrance_staff">입장 직원</option><option value="event_manager">행사 관리자</option></select></label><fieldset><legend>운영 홀</legend>{halls.map((hall)=><label key={hall.id}><input type="checkbox" checked={item.hallCodes.includes(hall.id)} onChange={()=>toggleHall(item,hall.id)}/>{hall.name}</label>)}</fieldset><button className="primary-button" disabled={saving===item.userId} onClick={()=>void save(item)}>{saving===item.userId?"저장 중…":"권한 저장"}</button></article>)}</div>}</section></div>;
 }
 
 type SeatMapViewProps = {
@@ -778,6 +837,7 @@ function SeatManagerAppInner() {
   const [hall,setHall]=useState<Hall | null>(null);
   const [session,setSession]=useState<Session | null>(null);
   const [changeOpen,setChangeOpen]=useState(false);
+  const [staffOpen,setStaffOpen]=useState(false);
   const [active,setActive]=useState<MenuId>('dashboard');
   const [floor, setFloor] = useState<Floor>("1층");
   const [query, setQuery] = useState("");
@@ -790,14 +850,16 @@ function SeatManagerAppInner() {
   const goHome=()=>{setHall(null);setSession(null);setChangeOpen(false);};
   if(!hall)return <HallSelectView onSelect={openHall}/>;
   if(!session)return <EventSelectView hall={hall} onBack={goHome} onSelect={openSession}/>;
+  const visibleMenu=profile?.role==="entrance_staff"?MENU.filter(([id])=>ENTRANCE_MENU_IDS.has(id)):MENU;
   const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={session}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} onStats={(distributed,entered)=>setSession((current)=>current?{...current,distributed,entered}:current)}/>;if(active==='entry')return <EntryView hall={hall} session={session} onStats={(distributed,entered)=>setSession((current)=>current?{...current,distributed,entered}:current)}/>;if(active==='scan')return <ScanView hall={hall} session={session} onStats={(distributed,entered)=>setSession((current)=>current?{...current,distributed,entered}:current)}/>;if(active==='generate')return <GenerateView hall={hall} session={session}/>;if(active==='reassign')return <ReassignView hall={hall}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session}}/>;};
   const operatorName = profile?.displayName || user?.email?.split("@")[0] || "로그인 필요";
-  return <main className="tablet-shell"><aside className="sidebar"><button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button><div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div><nav aria-label="주요 메뉴">{MENU.map(([id,label])=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><span>{String(MENU.findIndex(item=>item[0]===id)+1).padStart(2,'0')}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div><span className="user-avatar">{operatorName.slice(0,1)}</span><p><strong>{operatorName}</strong><small>{profile?.role === "super_admin" ? "최고 관리자" : "현장 운영 직원"}</small></p></div><button onClick={goHome}>홀·직원 설정</button></div></aside><section className="workspace workspace--context"><OperationContextBar hall={hall} session={session} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/><div className="workspace-content">{render()}</div></section>{changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>}</main>;
+  return <main className="tablet-shell"><aside className="sidebar"><button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button><div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div><nav aria-label="주요 메뉴">{visibleMenu.map(([id,label],index)=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><span>{String(index+1).padStart(2,'0')}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div><span className="user-avatar">{operatorName.slice(0,1)}</span><p><strong>{operatorName}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></p></div><button onClick={()=>profile?.role==="super_admin"?setStaffOpen(true):goHome()}>{profile?.role==="super_admin"?"직원 권한 설정":"홀 선택"}</button></div></aside><section className="workspace workspace--context"><OperationContextBar hall={hall} session={session} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/><div className="workspace-content">{render()}</div></section>{changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>} {staffOpen&&<StaffSettingsModal onClose={()=>setStaffOpen(false)}/>}</main>;
 }
 
 export function SeatManagerApp({ initialHalls = FALLBACK_HALLS, initialSessions = FALLBACK_SESSIONS, dataSource = "fallback" }: { initialHalls?: Hall[]; initialSessions?: Session[]; dataSource?: "supabase" | "fallback" }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<{ displayName: string; role: string } | null>(null);
+  const [accessibleHallCodes,setAccessibleHallCodes]=useState<HallId[]|null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const supabase = useMemo(() => createClient(), []);
   useEffect(() => {
@@ -805,14 +867,18 @@ export function SeatManagerApp({ initialHalls = FALLBACK_HALLS, initialSessions 
     const loadProfile = async (nextUser: User | null) => {
       if (!active) return;
       setUser(nextUser);
-      if (!nextUser) { setProfile(null); return; }
+      if (!nextUser) { setProfile(null); setAccessibleHallCodes(null); return; }
       const { data } = await supabase.from("profiles").select("display_name, role").eq("user_id", nextUser.id).maybeSingle();
-      if (active) setProfile(data ? { displayName: data.display_name, role: data.role } : null);
+      if(!active)return;
+      setProfile(data ? { displayName: data.display_name, role: data.role } : null);
+      if(data?.role==="super_admin"){setAccessibleHallCodes(null);return;}
+      const {data:accessData}=await supabase.from("staff_hall_access").select("halls!inner(code)").eq("user_id",nextUser.id);
+      if(active)setAccessibleHallCodes(((accessData??[]) as Array<{halls:unknown}>).flatMap((item)=>{const raw=Array.isArray(item.halls)?item.halls[0]:item.halls;return raw&&typeof raw==="object"?[(raw as {code:HallId}).code]:[];}));
     };
     void supabase.auth.getUser().then(({ data }) => loadProfile(data.user));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { void loadProfile(session?.user ?? null); });
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [supabase]);
   const signOut = async () => { await supabase.auth.signOut(); window.location.reload(); };
-  return <CatalogContext.Provider value={{ halls: initialHalls, sessions: initialSessions, dataSource, user, profile, requestAuth: () => setAuthOpen(true), signOut }}><SeatManagerAppInner />{authOpen && <AuthModal onClose={() => setAuthOpen(false)}/>}</CatalogContext.Provider>;
+  return <CatalogContext.Provider value={{ halls: initialHalls, sessions: initialSessions, dataSource, user, profile, accessibleHallCodes, requestAuth: () => setAuthOpen(true), signOut }}><SeatManagerAppInner />{authOpen && <AuthModal onClose={() => setAuthOpen(false)}/>}</CatalogContext.Provider>;
 }

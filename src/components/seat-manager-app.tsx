@@ -11,7 +11,9 @@ type SeatStatus = "distributed" | "entered" | "empty" | "onsite";
 type SeatRange = readonly [number, number] | null;
 type RowConfig = { row: string; blocks: SeatRange[] };
 type Floor = "1층" | "2층";
-type Seat = { id: string; row: string; number: number; status: SeatStatus };
+type Seat = { id: string; row: string; number: number; status: SeatStatus; recipient?: string | null };
+type SeatMapState = { status: SeatStatus; recipient: string | null };
+type SeatZone = { id: string; label: string; floorCode: string; rowStart: string; rowEnd: string; numberStart: number; numberEnd: number; description: string };
 type MenuId = "dashboard" | "seats" | "allocation" | "entry" | "scan" | "generate" | "reassign" | "history" | "events";
 type Activity = readonly [string, string, string, string];
 
@@ -48,16 +50,26 @@ const ROWS_2F: RowConfig[] = [
 ];
 
 const STATUS: SeatStatus[] = ["distributed", "entered", "empty", "onsite"];
-const STATUS_LABEL: Record<SeatStatus, string> = { distributed: "배부 완료", entered: "입장 완료", empty: "미입장", onsite: "현장 배정" };
+const STATUS_LABEL: Record<SeatStatus, string> = { distributed: "배부 완료", entered: "입장 완료", empty: "미배분", onsite: "현장 배정" };
 const SEAT_W = 29;
 const SEAT_H = 18;
 const SEAT_GAP = 2;
 
-function seatStatus(rowIndex: number, seatNumber: number): SeatStatus {
-  void rowIndex;
-  void seatNumber;
-  return "empty";
-}
+const EMPTY_SEAT_STATE: SeatMapState = { status: "empty", recipient: null };
+
+const SEAT_ZONES: SeatZone[] = [
+  { id: "1F-1", label: "1존", floorCode: "1F", rowStart: "A", rowEnd: "K", numberStart: 1, numberEnd: 6, description: "앞쪽 좌측" },
+  { id: "1F-2", label: "2존", floorCode: "1F", rowStart: "A", rowEnd: "K", numberStart: 7, numberEnd: 14, description: "앞쪽 중앙 좌측" },
+  { id: "1F-3", label: "3존", floorCode: "1F", rowStart: "A", rowEnd: "K", numberStart: 15, numberEnd: 22, description: "앞쪽 중앙 우측" },
+  { id: "1F-4", label: "4존", floorCode: "1F", rowStart: "A", rowEnd: "K", numberStart: 23, numberEnd: 28, description: "앞쪽 우측" },
+  { id: "1F-5", label: "5존", floorCode: "1F", rowStart: "L", rowEnd: "T", numberStart: 1, numberEnd: 6, description: "뒤쪽 좌측" },
+  { id: "1F-6", label: "6존", floorCode: "1F", rowStart: "L", rowEnd: "T", numberStart: 7, numberEnd: 14, description: "뒤쪽 중앙 좌측" },
+  { id: "1F-7", label: "7존", floorCode: "1F", rowStart: "L", rowEnd: "T", numberStart: 15, numberEnd: 22, description: "뒤쪽 중앙 우측" },
+  { id: "1F-8", label: "8존", floorCode: "1F", rowStart: "L", rowEnd: "T", numberStart: 23, numberEnd: 28, description: "뒤쪽 우측" },
+  { id: "2F-1", label: "1존", floorCode: "2F", rowStart: "A", rowEnd: "F", numberStart: 1, numberEnd: 9, description: "좌측" },
+  { id: "2F-2", label: "2존", floorCode: "2F", rowStart: "A", rowEnd: "F", numberStart: 10, numberEnd: 25, description: "중앙" },
+  { id: "2F-3", label: "3존", floorCode: "2F", rowStart: "A", rowEnd: "F", numberStart: 26, numberEnd: 34, description: "우측" },
+];
 
 function numbersIn(range: SeatRange): number[] {
   if (!range) return [];
@@ -75,15 +87,17 @@ type SvgSeatProps = {
   height?: number;
   selectedId?: string;
   queryId?: string;
+  seatState: (row: string, number: number) => SeatMapState;
   onSelect: (seat: Seat) => void;
 };
 
-function SvgSeat({ row, number, rowIndex, x, y, angle = 0, width = SEAT_W, height = SEAT_H, selectedId, queryId, onSelect }: SvgSeatProps) {
+function SvgSeat({ row, number, rowIndex, x, y, angle = 0, width = SEAT_W, height = SEAT_H, selectedId, queryId, seatState, onSelect }: SvgSeatProps) {
+  void rowIndex;
   const id = `${row}-${String(number).padStart(2, "0")}`;
-  const status = seatStatus(rowIndex, number);
+  const { status, recipient } = seatState(row, number);
   const selected = selectedId === id;
   const searched = queryId === id;
-  const activate = () => onSelect({ id, row, number, status });
+  const activate = () => onSelect({ id, row, number, status, recipient });
 
   return (
     <g
@@ -91,7 +105,7 @@ function SvgSeat({ row, number, rowIndex, x, y, angle = 0, width = SEAT_W, heigh
       transform={`translate(${x} ${y}) rotate(${angle} ${width / 2} ${height / 2})`}
       role="button"
       tabIndex={0}
-      aria-label={`${id} ${STATUS_LABEL[status]}`}
+      aria-label={`${id} ${STATUS_LABEL[status]}${recipient ? ` ${recipient}` : ""}`}
       aria-pressed={selected}
       onClick={activate}
       onKeyDown={(event) => {
@@ -113,7 +127,7 @@ type SvgSeatBlockProps = Omit<SvgSeatProps, "number"> & {
   gap?: number;
 };
 
-function SvgSeatBlock({ range, row, rowIndex, x, y, align = "start", width = SEAT_W, height = SEAT_H, gap = SEAT_GAP, selectedId, queryId, onSelect }: SvgSeatBlockProps) {
+function SvgSeatBlock({ range, row, rowIndex, x, y, align = "start", width = SEAT_W, height = SEAT_H, gap = SEAT_GAP, selectedId, queryId, seatState, onSelect }: SvgSeatBlockProps) {
   const numbers = numbersIn(range);
   const pitch = width + gap;
   const startX = align === "end" ? x - (numbers.length * pitch - gap) : x;
@@ -129,14 +143,15 @@ function SvgSeatBlock({ range, row, rowIndex, x, y, align = "start", width = SEA
       height={height}
       selectedId={selectedId}
       queryId={queryId}
+      seatState={seatState}
       onSelect={onSelect}
     />
   ));
 }
 
-type SeatMapSvgProps = Pick<SvgSeatProps, "selectedId" | "queryId" | "onSelect">;
+type SeatMapSvgProps = Pick<SvgSeatProps, "selectedId" | "queryId" | "seatState" | "onSelect">;
 
-function FirstFloorSvg({ selectedId, queryId, onSelect }: SeatMapSvgProps) {
+function FirstFloorSvg({ selectedId, queryId, seatState, onSelect }: SeatMapSvgProps) {
   return (
     <svg className="hall-map-svg hall-map-svg--one" viewBox="0 0 1120 600" role="img" aria-label="하은홀 1층 506석 좌석 배치도">
       <g className="map-architecture">
@@ -151,10 +166,10 @@ function FirstFloorSvg({ selectedId, queryId, onSelect }: SeatMapSvgProps) {
           const y = 88 + rowIndex * 21 + (rowIndex >= 11 ? 24 : 0);
           return (
             <g key={config.row} className={`floor-row floor-row--${config.row}`}>
-              <SvgSeatBlock range={config.blocks[0]} row={config.row} rowIndex={rowIndex} x={230} y={y} align="end" selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
-              <SvgSeatBlock range={config.blocks[1]} row={config.row} rowIndex={rowIndex} x={525} y={y} align="end" selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
-              <SvgSeatBlock range={config.blocks[2]} row={config.row} rowIndex={rowIndex} x={595} y={y} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
-              <SvgSeatBlock range={config.blocks[3]} row={config.row} rowIndex={rowIndex} x={890} y={y} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
+              <SvgSeatBlock range={config.blocks[0]} row={config.row} rowIndex={rowIndex} x={230} y={y} align="end" selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
+              <SvgSeatBlock range={config.blocks[1]} row={config.row} rowIndex={rowIndex} x={525} y={y} align="end" selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
+              <SvgSeatBlock range={config.blocks[2]} row={config.row} rowIndex={rowIndex} x={595} y={y} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
+              <SvgSeatBlock range={config.blocks[3]} row={config.row} rowIndex={rowIndex} x={890} y={y} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
             </g>
           );
         })}
@@ -167,7 +182,7 @@ function FirstFloorSvg({ selectedId, queryId, onSelect }: SeatMapSvgProps) {
   );
 }
 
-function SecondFloorSvg({ selectedId, queryId, onSelect }: SeatMapSvgProps) {
+function SecondFloorSvg({ selectedId, queryId, seatState, onSelect }: SeatMapSvgProps) {
   const width = 27;
   const height = 20;
   const gap = 2;
@@ -185,18 +200,18 @@ function SecondFloorSvg({ selectedId, queryId, onSelect }: SeatMapSvgProps) {
           const rightEdge = 838;
           return (
             <g key={config.row} className={`floor-row floor-row--${config.row}`}>
-              <SvgSeatBlock range={config.blocks[0]} row={config.row} rowIndex={rowIndex} x={leftEdge} y={y} align="end" width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
+              <SvgSeatBlock range={config.blocks[0]} row={config.row} rowIndex={rowIndex} x={leftEdge} y={y} align="end" width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
               {config.row === "A" ? (
                 <>
-                  <SvgSeatBlock range={config.blocks[1]} row={config.row} rowIndex={rowIndex} x={485} y={y} align="end" width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
-                  <SvgSeatBlock range={config.blocks[2]} row={config.row} rowIndex={rowIndex} x={635} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
+                  <SvgSeatBlock range={config.blocks[1]} row={config.row} rowIndex={rowIndex} x={485} y={y} align="end" width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
+                  <SvgSeatBlock range={config.blocks[2]} row={config.row} rowIndex={rowIndex} x={635} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
                   <g className="control-desk-svg"><rect x="513" y={y - 3} width="94" height="23" rx="4" /><text x="560" y={y + 7}>CONTROL DESK</text></g>
-                  <SvgSeatBlock range={config.blocks[3]} row={config.row} rowIndex={rowIndex} x={rightEdge} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
+                  <SvgSeatBlock range={config.blocks[3]} row={config.row} rowIndex={rowIndex} x={rightEdge} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
                 </>
               ) : (
                 <>
-                  <SvgSeatBlock range={config.blocks[1]} row={config.row} rowIndex={rowIndex} x={329} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
-                  <SvgSeatBlock range={config.blocks[2]} row={config.row} rowIndex={rowIndex} x={rightEdge} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} onSelect={onSelect} />
+                  <SvgSeatBlock range={config.blocks[1]} row={config.row} rowIndex={rowIndex} x={329} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
+                  <SvgSeatBlock range={config.blocks[2]} row={config.row} rowIndex={rowIndex} x={rightEdge} y={y} width={width} height={height} gap={gap} selectedId={selectedId} queryId={queryId} seatState={seatState} onSelect={onSelect} />
                 </>
               )}
             </g>
@@ -472,6 +487,11 @@ function AllocationView({ hall, session, onStats }: { hall: Hall; session: Sessi
   const [allocated,setAllocated]=useState<Map<number,AllocationRecord>>(new Map());
   const [floorCode,setFloorCode]=useState("1F");
   const [row,setRow]=useState("A");
+  const [selectionMode,setSelectionMode]=useState<"row"|"zone">("zone");
+  const [rangeRowStart,setRangeRowStart]=useState("A");
+  const [rangeRowEnd,setRangeRowEnd]=useState("K");
+  const [rangeNumberStart,setRangeNumberStart]=useState(8);
+  const [rangeNumberEnd,setRangeNumberEnd]=useState(14);
   const [picked,setPicked]=useState<number[]>([]);
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -510,12 +530,30 @@ function AllocationView({ hall, session, onStats }: { hall: Hall; session: Sessi
   const floors=[...new Map(seats.map((seat)=>[seat.floorCode,seat.floorName])).entries()].sort(([left],[right])=>left.localeCompare(right));
   const rows=[...new Set(seats.filter((seat)=>seat.floorCode===floorCode).map((seat)=>seat.row))].sort((a,b)=>a.localeCompare(b));
   const visibleSeats=seats.filter((seat)=>seat.floorCode===floorCode&&seat.row===row).sort((a,b)=>a.number-b.number);
-  const pickedSeats=picked.map((id)=>seats.find((seat)=>seat.id===id)).filter((seat):seat is AllocationSeat=>Boolean(seat));
+  const zones=SEAT_ZONES.filter((zone)=>zone.floorCode===floorCode);
+  const pickedSeats=picked.map((id)=>seats.find((seat)=>seat.id===id)).filter((seat):seat is AllocationSeat=>Boolean(seat)).sort((left,right)=>left.floorCode.localeCompare(right.floorCode)||left.row.localeCompare(right.row)||left.number-right.number);
   const chooseFloor=(nextFloor:string)=>{
     setFloorCode(nextFloor);
     const firstRow=[...new Set(seats.filter((seat)=>seat.floorCode===nextFloor).map((seat)=>seat.row))].sort((a,b)=>a.localeCompare(b))[0]??"A";
     setRow(firstRow);
+    setRangeRowStart(firstRow);
+    setRangeRowEnd(nextFloor==="1F"?"K":"F");
+    setRangeNumberStart(nextFloor==="1F"?8:1);
+    setRangeNumberEnd(nextFloor==="1F"?14:9);
   };
+  const seatsInBounds=(rowStart:string,rowEnd:string,numberStart:number,numberEnd:number)=>seats.filter((seat)=>seat.floorCode===floorCode&&seat.row>=rowStart&&seat.row<=rowEnd&&seat.number>=numberStart&&seat.number<=numberEnd);
+  const availableFrom=(candidates:AllocationSeat[])=>candidates.filter((seat)=>!allocated.has(seat.id));
+  const toggleCandidates=(candidates:AllocationSeat[])=>{
+    const available=availableFrom(candidates);
+    const allSelected=available.length>0&&available.every((seat)=>picked.includes(seat.id));
+    setPicked((current)=>allSelected?current.filter((id)=>!available.some((seat)=>seat.id===id)):[...new Set([...current,...available.map((seat)=>seat.id)])]);
+  };
+  const rangeRows=[rangeRowStart,rangeRowEnd].sort((a,b)=>a.localeCompare(b));
+  const rangeNumbers=[rangeNumberStart,rangeNumberEnd].sort((a,b)=>a-b);
+  const customRangeSeats=seatsInBounds(rangeRows[0],rangeRows[1],rangeNumbers[0],rangeNumbers[1]);
+  const customRangeAvailable=availableFrom(customRangeSeats);
+  const maxSeatNumber=floorCode==="1F"?28:34;
+  const pickedPreview=pickedSeats.slice(0,12).map((seat)=>`${seat.floorName} ${seat.row}-${String(seat.number).padStart(2,"0")}`).join(", ");
   const selectVisibleAvailable=()=>setPicked((current)=>[...new Set([...current,...visibleSeats.filter((seat)=>!allocated.has(seat.id)).map((seat)=>seat.id)])]);
 
   const submit=async()=>{
@@ -546,7 +584,16 @@ function AllocationView({ hall, session, onStats }: { hall: Hall; session: Sessi
   return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="좌석 배분" description="개인 또는 단체에 실제 좌석을 배분합니다." />
     {message&&<div className={`notice notice--${message.tone}`}>{message.text}</div>}
     <section className="split-layout allocation-layout"><article className="content-card form-card"><div className="section-title"><div><h2>배부 대상 정보</h2><p>개인과 단체 입력 항목이 자동으로 전환됩니다.</p></div><span className="step-badge">1</span></div><div className="segmented"><button type="button" className={recipientType==="group"?"active":""} onClick={()=>setRecipientType("group")}>단체</button><button type="button" className={recipientType==="individual"?"active":""} onClick={()=>setRecipientType("individual")}>개인</button></div>{recipientType==="group"?<><label className="form-field"><span>단체명 *</span><input value={groupName} onChange={(event)=>setGroupName(event.target.value)} placeholder="단체명을 입력하세요"/></label><label className="form-field"><span>담당자</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="담당자 이름"/></label></>:<label className="form-field"><span>개인 이름 *</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="이름을 입력하세요"/></label>}<label className="form-field"><span>연락처</span><input value={contact} onChange={(event)=>setContact(event.target.value)} placeholder="010-0000-0000"/></label><label className="form-field"><span>메모</span><input value={note} onChange={(event)=>setNote(event.target.value)} placeholder="현장 전달사항을 입력하세요"/></label></article>
-      <article className="content-card form-card allocation-seat-card"><div className="section-title"><div><h2>실제 좌석 선택</h2><p>배분 완료 좌석은 다시 선택할 수 없습니다.</p></div><span className="step-badge">2</span></div><div className="inline-controls"><select aria-label="층" value={floorCode} onChange={(event)=>chooseFloor(event.target.value)}>{floors.map(([code,name])=><option key={code} value={code}>{name}</option>)}</select><select aria-label="열" value={row} onChange={(event)=>setRow(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}열</option>)}</select><button type="button" className="secondary-button" onClick={selectVisibleAvailable}>현재 열 전체 선택</button><button type="button" className="secondary-button" onClick={()=>setPicked([])}>선택 해제</button></div>{loading?<div className="compact-empty">좌석 정보를 불러오는 중입니다.</div>:<div className="seat-picker seat-picker--allocation">{visibleSeats.map((seat)=>{const unavailable=allocated.get(seat.id);const selected=picked.includes(seat.id);return <button type="button" key={seat.id} disabled={Boolean(unavailable)} title={unavailable?(unavailable.group_name||unavailable.assignee_name||"배분 완료"):seat.label} className={`${selected?"picked":""} ${unavailable?"is-unavailable":""}`} onClick={()=>setPicked((current)=>current.includes(seat.id)?current.filter((id)=>id!==seat.id):[...current,seat.id])}>{seat.row}-{String(seat.number).padStart(2,"0")}<small>{unavailable?"배분 완료":"선택 가능"}</small></button>})}</div>}<div className="selection-summary"><span>선택 좌석</span><strong>{picked.length}석</strong><p>{pickedSeats.map((seat)=>`${seat.floorName} ${seat.row}-${String(seat.number).padStart(2,"0")}`).join(", ")||"좌석을 선택하세요"}</p></div><button className="primary-button" disabled={busy||loading||!picked.length} onClick={()=>void submit()}>{busy?"DB에 저장 중…":`선택한 ${picked.length}석 배분`}</button></article></section>
+      <article className="content-card form-card allocation-seat-card">
+        <div className="section-title"><div><h2>실제 좌석 선택</h2><p>구역 또는 열을 선택하면 결번과 배분 완료 좌석은 자동 제외됩니다.</p></div><span className="step-badge">2</span></div>
+        <div className="segmented allocation-mode-tabs"><button type="button" className={selectionMode==="zone"?"active":""} onClick={()=>setSelectionMode("zone")}>구역 선택</button><button type="button" className={selectionMode==="row"?"active":""} onClick={()=>setSelectionMode("row")}>열별 선택</button></div>
+        <div className="inline-controls"><select aria-label="층" value={floorCode} onChange={(event)=>chooseFloor(event.target.value)}>{floors.map(([code,name])=><option key={code} value={code}>{name}</option>)}</select>{selectionMode==="row"&&<><select aria-label="열" value={row} onChange={(event)=>setRow(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}열</option>)}</select><button type="button" className="secondary-button" onClick={selectVisibleAvailable}>현재 열 전체 선택</button></>}<button type="button" className="secondary-button" onClick={()=>setPicked([])}>전체 선택 해제</button></div>
+        {loading?<div className="compact-empty">좌석 정보를 불러오는 중입니다.</div>:selectionMode==="zone"?<>
+          <div className={`zone-grid zone-grid--${floorCode==="1F"?"eight":"three"}`}>{zones.map((zone)=>{const candidates=seatsInBounds(zone.rowStart,zone.rowEnd,zone.numberStart,zone.numberEnd);const available=availableFrom(candidates);const selectedCount=available.filter((seat)=>picked.includes(seat.id)).length;const unavailableCount=candidates.length-available.length;const fullySelected=available.length>0&&selectedCount===available.length;return <button type="button" key={zone.id} className={`zone-card ${fullySelected?"active":""}`} disabled={!available.length} onClick={()=>toggleCandidates(candidates)}><span>{zone.description}</span><strong>{zone.label}</strong><small>{zone.rowStart}~{zone.rowEnd}열 · {zone.numberStart}~{zone.numberEnd}번</small><em>{selectedCount?`${selectedCount}/${available.length}석 선택`:`${available.length}석 선택 가능`}{unavailableCount?` · ${unavailableCount}석 제외`:""}</em></button>})}</div>
+          <section className="range-builder" aria-label="사용자 지정 좌석 범위"><div><strong>사용자 지정 범위</strong><span>예: A~K열, 8~14번</span></div><label><span>시작 열</span><select aria-label="범위 시작 열" value={rangeRowStart} onChange={(event)=>setRangeRowStart(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}</option>)}</select></label><label><span>끝 열</span><select aria-label="범위 끝 열" value={rangeRowEnd} onChange={(event)=>setRangeRowEnd(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}</option>)}</select></label><label><span>시작 번호</span><select aria-label="범위 시작 번호" value={rangeNumberStart} onChange={(event)=>setRangeNumberStart(Number(event.target.value))}>{Array.from({length:maxSeatNumber},(_,index)=>index+1).map((number)=><option key={number} value={number}>{number}</option>)}</select></label><label><span>끝 번호</span><select aria-label="범위 끝 번호" value={rangeNumberEnd} onChange={(event)=>setRangeNumberEnd(Number(event.target.value))}>{Array.from({length:maxSeatNumber},(_,index)=>index+1).map((number)=><option key={number} value={number}>{number}</option>)}</select></label><button type="button" className="secondary-button" disabled={!customRangeAvailable.length} onClick={()=>toggleCandidates(customRangeSeats)}>{customRangeAvailable.length}석 범위 추가</button><small>총 {customRangeSeats.length}석 · 배분 완료 {customRangeSeats.length-customRangeAvailable.length}석 자동 제외</small></section>
+        </>:<div className="seat-picker seat-picker--allocation">{visibleSeats.map((seat)=>{const unavailable=allocated.get(seat.id);const selected=picked.includes(seat.id);return <button type="button" key={seat.id} disabled={Boolean(unavailable)} title={unavailable?(unavailable.group_name||unavailable.assignee_name||"배분 완료"):seat.label} className={`${selected?"picked":""} ${unavailable?"is-unavailable":""}`} onClick={()=>setPicked((current)=>current.includes(seat.id)?current.filter((id)=>id!==seat.id):[...current,seat.id])}>{seat.row}-{String(seat.number).padStart(2,"0")}<small>{unavailable?"배분 완료":"선택 가능"}</small></button>})}</div>}
+        <div className="selection-summary"><span>선택 좌석</span><strong>{picked.length}석</strong><p>{pickedPreview||"좌석을 선택하세요"}{pickedSeats.length>12?` 외 ${pickedSeats.length-12}석`:""}</p></div><button className="primary-button" disabled={busy||loading||!picked.length} onClick={()=>void submit()}>{busy?"DB에 저장 중…":`선택한 ${picked.length}석 배분`}</button>
+      </article></section>
   </div>;
 }
 
@@ -598,20 +645,46 @@ type SeatMapViewProps = {
   confirmed: boolean;
   setConfirmed: Dispatch<SetStateAction<boolean>>;
   hall: Hall;
+  session: Session;
 };
 
-function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setConfirmed,hall }: SeatMapViewProps) {
+function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setConfirmed,hall,session }: SeatMapViewProps) {
+  const { user } = useCatalog();
+  const [seatStates,setSeatStates]=useState<Map<string,SeatMapState>>(new Map());
+  const [stateLoading,setStateLoading]=useState(Boolean(user));
+  useEffect(()=>{
+    if(hall.id!=="haeun"||!user)return;
+    let active=true;
+    void fetchAllocationData(hall.id,session.sessionId,true).then(({seats,records})=>{
+      if(!active)return;
+      const recordsBySeat=new Map(records.map((record)=>[record.seat_id,record]));
+      const next=new Map<string,SeatMapState>();
+      seats.forEach((seat)=>{
+        const record=recordsBySeat.get(seat.id);
+        if(!record||record.allocation_status==="available")return;
+        next.set(`${seat.floorCode}-${seat.row}-${seat.number}`,{
+          status:record.admission_status==="entered"?"entered":record.allocation_status==="distributed"?"distributed":"onsite",
+          recipient:record.group_name||record.assignee_name,
+        });
+      });
+      setSeatStates(next);
+      setStateLoading(false);
+    }).catch(()=>{if(active)setStateLoading(false);});
+    return()=>{active=false;};
+  },[hall.id,session.sessionId,user]);
   if(hall.id!=='haeun')return <div className="view"><PageHeader eyebrow={`${hall.name} · 1층`} title="좌석 현황" description="좌석 배치도 등록 전 레이아웃입니다."/><section className="content-card pending-seat-plan"><strong>{hall.name} 좌석 도면 준비 중</strong><p>실제 좌석 배치도를 받으면 복도·결번·좌석번호를 동일한 방식으로 반영합니다.</p><div><span>예상 규모</span><strong>{hall.capacity}석</strong></div></section></div>;
   const rows=floor==='1층'?ROWS_1F:ROWS_2F;
+  const floorCode=floor==='1층'?"1F":"2F";
+  const resolveSeatState=(rowLabel:string,seatNumber:number)=>seatStates.get(`${floorCode}-${rowLabel}-${seatNumber}`)??EMPTY_SEAT_STATE;
   const numberedSeatCount=rows.reduce((total,row)=>total+row.blocks.reduce((sum,range)=>sum+(range?range[1]-range[0]+1:0),0),0);
   const seatCount=floor==='1층'?506:numberedSeatCount;
   const queryId=query.trim().toUpperCase().replace(/\s+/g,'').replace(/^([A-T])-?(\d{1,2})$/,(_match: string,row: string,number: string)=>`${row}-${String(Number(number)).padStart(2,'0')}`);
   const selectFloor=(label: Floor)=>{setFloor(label);setQuery('');setConfirmed(false);setSelected(null);};
-  const handleSearch=(event: FormEvent<HTMLFormElement>)=>{event.preventDefault();rows.forEach((config,rowIndex)=>config.blocks.forEach((range)=>{if(!range)return;const [start,end]=range;for(let number=start;number<=end;number+=1){const id=`${config.row}-${String(number).padStart(2,'0')}`;if(id===queryId){setSelected({id,row:config.row,number,status:seatStatus(rowIndex,number)});setConfirmed(false);}}}));};
-  return <div className="view view--seats"><PageHeader eyebrow="실시간 좌석 운영" title={`${floor} 좌석 현황`} />
+  const handleSearch=(event: FormEvent<HTMLFormElement>)=>{event.preventDefault();rows.forEach((config)=>config.blocks.forEach((range)=>{if(!range)return;const [start,end]=range;for(let number=start;number<=end;number+=1){const id=`${config.row}-${String(number).padStart(2,'0')}`;if(id===queryId){const state=resolveSeatState(config.row,number);setSelected({id,row:config.row,number,status:state.status,recipient:state.recipient});setConfirmed(false);}}}));};
+  return <div className="view view--seats"><PageHeader eyebrow="실시간 좌석 운영" title={`${floor} 좌석 현황`} description={!user?"직원 로그인 후 실제 배분 상태를 확인할 수 있습니다.":stateLoading?"배분 상태를 불러오는 중입니다.":`${session.event} 배분 상태가 반영되었습니다.`} />
     <section className="toolbar" aria-label="좌석 도구"><div className="floor-tabs">{(['1층','2층'] as Floor[]).map(label=><button key={label} className={floor===label?'active':''} onClick={()=>selectFloor(label)}>{label}</button>)}</div><form className="search" onSubmit={handleSearch}><label htmlFor="seat-search">좌석 검색</label><input id="seat-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="예: C-12"/><button>찾기</button></form><div className="legend">{STATUS.map(status=><span key={status}><i className={`dot dot--${status}`}/>{STATUS_LABEL[status]}</span>)}</div></section>
-    <section className={`map-panel map-panel--${floor==='1층'?'one':'two'}`}>{floor==='1층'?<FirstFloorSvg selectedId={selected?.id} queryId={queryId} onSelect={seat=>{setSelected(seat);setConfirmed(false)}}/>:<SecondFloorSvg selectedId={selected?.id} queryId={queryId} onSelect={seat=>{setSelected(seat);setConfirmed(false)}}/>}</section>
-    <footer className="selection-bar"><div className="seat-total"><strong>{seatCount}</strong><span>도면 표기 {floor} 좌석</span></div><div className="selection-copy"><span>선택 좌석</span><strong>{selected?.id??'좌석을 선택하세요'}</strong>{selected&&<em className={`state state--${selected.status}`}>{STATUS_LABEL[selected.status]}</em>}</div><button className="confirm" disabled>입장 기능 연결 예정</button></footer>
+    <section className={`map-panel map-panel--${floor==='1층'?'one':'two'}`}>{floor==='1층'?<FirstFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={seat=>{setSelected(seat);setConfirmed(false)}}/>:<SecondFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={seat=>{setSelected(seat);setConfirmed(false)}}/>}</section>
+    <footer className="selection-bar"><div className="seat-total"><strong>{seatCount}</strong><span>도면 표기 {floor} 좌석</span></div><div className="selection-copy"><span>선택 좌석</span><strong>{selected?.id??'좌석을 선택하세요'}</strong>{selected&&<em className={`state state--${selected.status}`}>{STATUS_LABEL[selected.status]}</em>}{selected?.recipient&&<small className="selection-recipient">{selected.recipient}</small>}</div><button className="confirm" disabled>입장 기능 연결 예정</button></footer>
   </div>;
 }
 
@@ -632,7 +705,7 @@ function SeatManagerAppInner() {
   const goHome=()=>{setHall(null);setSession(null);setChangeOpen(false);};
   if(!hall)return <HallSelectView onSelect={openHall}/>;
   if(!session)return <EventSelectView hall={hall} onBack={goHome} onSelect={openSession}/>;
-  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={session}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} onStats={(distributed,entered)=>setSession((current)=>current?{...current,distributed,entered}:current)}/>;if(active==='entry')return <EntryView/>;if(active==='scan')return <ScanView/>;if(active==='generate')return <GenerateView hall={hall} session={session}/>;if(active==='reassign')return <ReassignView hall={hall}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall}}/>;};
+  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={session}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} onStats={(distributed,entered)=>setSession((current)=>current?{...current,distributed,entered}:current)}/>;if(active==='entry')return <EntryView/>;if(active==='scan')return <ScanView/>;if(active==='generate')return <GenerateView hall={hall} session={session}/>;if(active==='reassign')return <ReassignView hall={hall}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session}}/>;};
   const operatorName = profile?.displayName || user?.email?.split("@")[0] || "로그인 필요";
   return <main className="tablet-shell"><aside className="sidebar"><button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button><div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div><nav aria-label="주요 메뉴">{MENU.map(([id,label])=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><span>{String(MENU.findIndex(item=>item[0]===id)+1).padStart(2,'0')}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div><span className="user-avatar">{operatorName.slice(0,1)}</span><p><strong>{operatorName}</strong><small>{profile?.role === "super_admin" ? "최고 관리자" : "현장 운영 직원"}</small></p></div><button onClick={goHome}>홀·직원 설정</button></div></aside><section className="workspace workspace--context"><OperationContextBar hall={hall} session={session} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/><div className="workspace-content">{render()}</div></section>{changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>}</main>;
 }

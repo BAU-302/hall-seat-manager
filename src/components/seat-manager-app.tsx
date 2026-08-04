@@ -454,14 +454,19 @@ type AllocationRecord = {
   admission_status: string;
   assignee_name: string | null;
   group_name: string | null;
+  contact: string | null;
+  note: string;
+  allocated_at: string | null;
 };
+
+type ManagedAllocation = { seat: AllocationSeat; record: AllocationRecord };
 
 async function fetchAllocationData(hallId: HallId, sessionId: number, canReadAllocations: boolean) {
   const supabase=createClient();
   const [{data:seatData,error:seatError},{data:allocationData,error:allocationError}]=await Promise.all([
     supabase.from("seats").select("id, seat_code, row_label, seat_number, hall_floors!inner(floor_code, name, halls!inner(code))").eq("is_active",true).order("seat_number"),
     canReadAllocations
-      ? supabase.from("session_seats").select("seat_id, allocation_status, admission_status, assignee_name, group_name").eq("session_id",sessionId)
+      ? supabase.from("session_seats").select("seat_id, allocation_status, admission_status, assignee_name, group_name, contact, note, allocated_at").eq("session_id",sessionId)
       : Promise.resolve({data:[],error:null}),
   ]);
   if(seatError||allocationError)throw (seatError??allocationError);
@@ -478,6 +483,7 @@ async function fetchAllocationData(hallId: HallId, sessionId: number, canReadAll
 
 function AllocationView({ hall, session, onStats }: { hall: Hall; session: Session; onStats: (distributed: number, entered: number) => void }) {
   const { user, requestAuth } = useCatalog();
+  const [workflowMode,setWorkflowMode]=useState<"allocate"|"manage">("allocate");
   const [recipientType,setRecipientType]=useState<"group"|"individual">("group");
   const [groupName,setGroupName]=useState("");
   const [assigneeName,setAssigneeName]=useState("");
@@ -494,6 +500,10 @@ function AllocationView({ hall, session, onStats }: { hall: Hall; session: Sessi
   const [rangeNumberEnd,setRangeNumberEnd]=useState(14);
   const [picked,setPicked]=useState<number[]>([]);
   const [busy,setBusy]=useState(false);
+  const [releaseBusy,setReleaseBusy]=useState(false);
+  const [managementQuery,setManagementQuery]=useState("");
+  const [releasePicked,setReleasePicked]=useState<number[]>([]);
+  const [releaseReason,setReleaseReason]=useState("");
   const [loading,setLoading]=useState(true);
   const [message,setMessage]=useState<{tone:"success"|"error";text:string}|null>(null);
 
@@ -554,6 +564,10 @@ function AllocationView({ hall, session, onStats }: { hall: Hall; session: Sessi
   const customRangeAvailable=availableFrom(customRangeSeats);
   const maxSeatNumber=floorCode==="1F"?28:34;
   const pickedPreview=pickedSeats.slice(0,12).map((seat)=>`${seat.floorName} ${seat.row}-${String(seat.number).padStart(2,"0")}`).join(", ");
+  const managedAllocations=seats.flatMap((seat)=>{const record=allocated.get(seat.id);return record&&record.allocation_status==="distributed"?[{seat,record} satisfies ManagedAllocation]:[];}).sort((left,right)=>left.seat.floorCode.localeCompare(right.seat.floorCode)||left.seat.row.localeCompare(right.seat.row)||left.seat.number-right.seat.number);
+  const normalizedManagementQuery=managementQuery.trim().toLowerCase().replace(/\s+/g,"");
+  const filteredManagedAllocations=managedAllocations.filter(({seat,record})=>!normalizedManagementQuery||[seat.label,`${seat.row}-${seat.number}`,record.group_name,record.assignee_name,record.contact].filter(Boolean).some((value)=>String(value).toLowerCase().replace(/\s+/g,"").includes(normalizedManagementQuery)));
+  const managementGroups=[...filteredManagedAllocations.reduce((groups,item)=>{const recipient=item.record.group_name||item.record.assignee_name||"대상 미입력";const key=`${item.record.group_name?"group":"individual"}:${recipient}`;const current=groups.get(key)??{key,recipient,type:item.record.group_name?"단체":"개인",items:[] as ManagedAllocation[]};current.items.push(item);groups.set(key,current);return groups;},new Map<string,{key:string;recipient:string;type:string;items:ManagedAllocation[]}>()).values()];
   const selectVisibleAvailable=()=>setPicked((current)=>[...new Set([...current,...visibleSeats.filter((seat)=>!allocated.has(seat.id)).map((seat)=>seat.id)])]);
 
   const submit=async()=>{
@@ -579,11 +593,32 @@ function AllocationView({ hall, session, onStats }: { hall: Hall; session: Sessi
     setBusy(false);
   };
 
+  const releaseSelected=async()=>{
+    if(!user){requestAuth();return;}
+    if(!releasePicked.length){setMessage({tone:"error",text:"배분을 취소할 좌석을 선택해 주세요."});return;}
+    const enteredCount=releasePicked.filter((seatId)=>allocated.get(seatId)?.admission_status==="entered").length;
+    if(enteredCount){setMessage({tone:"error",text:"입장 완료 좌석은 배분을 취소할 수 없습니다."});return;}
+    if(!window.confirm(`선택한 ${releasePicked.length}석의 배분을 취소할까요?\n취소 이력은 보존되며 좌석은 다시 배분할 수 있습니다.`))return;
+    setReleaseBusy(true);setMessage(null);
+    const {data,error}=await createClient().rpc("release_session_seats",{
+      p_session_code:session.id,
+      p_seat_ids:releasePicked,
+      p_reason:releaseReason.trim()||"배분 관리 화면에서 취소",
+    });
+    if(error){setMessage({tone:"error",text:error.message});setReleaseBusy(false);return;}
+    const count=Number(data??releasePicked.length);
+    setReleasePicked([]);setReleaseReason("");
+    setMessage({tone:"success",text:`좌석 ${count}석의 배분이 취소되어 다시 선택할 수 있습니다.`});
+    await loadAllocationData();
+    setReleaseBusy(false);
+  };
+
   if(hall.id!=="haeun")return <div className="view"><PageHeader eyebrow="사전 배부" title="좌석 배분" description={`${hall.name} 실제 좌석 도면 등록 후 사용할 수 있습니다.`}/><div className="empty-state content-card"><strong>{hall.name} 좌석 원본이 아직 없습니다</strong><p>좌석 도면을 등록하기 전에는 임의 좌석을 생성하지 않습니다.</p></div></div>;
 
-  return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="좌석 배분" description="개인 또는 단체에 실제 좌석을 배분합니다." />
+  return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="좌석 배분" description={workflowMode==="allocate"?"개인 또는 단체에 실제 좌석을 배분합니다.":"배분된 좌석을 검색하고 일부 또는 전체를 취소합니다."} />
+    <div className="qr-mode-tabs allocation-workflow-tabs"><button type="button" className={workflowMode==="allocate"?"active":""} onClick={()=>setWorkflowMode("allocate")}>새 좌석 배분</button><button type="button" className={workflowMode==="manage"?"active":""} onClick={()=>setWorkflowMode("manage")}>배분 관리 <span>{managedAllocations.length}</span></button></div>
     {message&&<div className={`notice notice--${message.tone}`}>{message.text}</div>}
-    <section className="split-layout allocation-layout"><article className="content-card form-card"><div className="section-title"><div><h2>배부 대상 정보</h2><p>개인과 단체 입력 항목이 자동으로 전환됩니다.</p></div><span className="step-badge">1</span></div><div className="segmented"><button type="button" className={recipientType==="group"?"active":""} onClick={()=>setRecipientType("group")}>단체</button><button type="button" className={recipientType==="individual"?"active":""} onClick={()=>setRecipientType("individual")}>개인</button></div>{recipientType==="group"?<><label className="form-field"><span>단체명 *</span><input value={groupName} onChange={(event)=>setGroupName(event.target.value)} placeholder="단체명을 입력하세요"/></label><label className="form-field"><span>담당자</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="담당자 이름"/></label></>:<label className="form-field"><span>개인 이름 *</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="이름을 입력하세요"/></label>}<label className="form-field"><span>연락처</span><input value={contact} onChange={(event)=>setContact(event.target.value)} placeholder="010-0000-0000"/></label><label className="form-field"><span>메모</span><input value={note} onChange={(event)=>setNote(event.target.value)} placeholder="현장 전달사항을 입력하세요"/></label></article>
+    {workflowMode==="manage"?<section className="content-card allocation-management"><div className="management-toolbar"><div><h2>배분 내역</h2><p>좌석번호·단체명·개인명·연락처로 검색할 수 있습니다.</p></div><label className="management-search"><span>배분 검색</span><input aria-label="배분 검색" value={managementQuery} onChange={(event)=>setManagementQuery(event.target.value)} placeholder="예: A-07 또는 학생지원처"/></label><div className="management-actions"><strong>{filteredManagedAllocations.length}석</strong><button type="button" className="secondary-button" onClick={()=>setReleasePicked((current)=>{const targets=filteredManagedAllocations.filter((item)=>item.record.admission_status!=="entered").map((item)=>item.seat.id);return targets.length>0&&targets.every((id)=>current.includes(id))?current.filter((id)=>!targets.includes(id)):[...new Set([...current,...targets])];})}>검색 결과 전체 선택</button><button type="button" className="secondary-button" onClick={()=>setReleasePicked([])}>선택 해제</button></div></div>{!user?<div className="compact-empty">직원 로그인 후 실제 배분 내역을 관리할 수 있습니다.</div>:loading?<div className="compact-empty">배분 내역을 불러오는 중입니다.</div>:managementGroups.length?<div className="allocation-group-list">{managementGroups.map((group)=>{const releasable=group.items.filter((item)=>item.record.admission_status!=="entered");const allSelected=releasable.length>0&&releasable.every((item)=>releasePicked.includes(item.seat.id));return <article key={group.key} className="allocation-group-card"><header><div><span>{group.type}</span><strong>{group.recipient}</strong><small>{group.items[0]?.record.contact||"연락처 없음"}</small></div><div><strong>{group.items.length}석</strong><button type="button" className={allSelected?"active":""} disabled={!releasable.length} onClick={()=>setReleasePicked((current)=>allSelected?current.filter((id)=>!releasable.some((item)=>item.seat.id===id)):[...new Set([...current,...releasable.map((item)=>item.seat.id)])])}>{allSelected?"단체 선택 해제":"단체 전체 선택"}</button></div></header><div className="managed-seat-grid">{group.items.map(({seat,record})=>{const selected=releasePicked.includes(seat.id);const entered=record.admission_status==="entered";return <button type="button" key={seat.id} className={selected?"active":""} disabled={entered} onClick={()=>setReleasePicked((current)=>selected?current.filter((id)=>id!==seat.id):[...current,seat.id])}><strong>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")}</strong><small>{entered?"입장 완료 · 취소 불가":selected?"취소 대상으로 선택됨":"배분 완료"}</small></button>})}</div></article>})}</div>:<div className="compact-empty">검색 조건에 맞는 배분 좌석이 없습니다.</div>}<footer className="release-bar"><div><span>취소 선택</span><strong>{releasePicked.length}석</strong></div><label><span>취소 사유</span><input aria-label="취소 사유" value={releaseReason} onChange={(event)=>setReleaseReason(event.target.value)} placeholder="예: 단체 요청으로 좌석 회수" maxLength={500}/></label><button type="button" className="danger-button" disabled={releaseBusy||!releasePicked.length} onClick={()=>void releaseSelected()}>{releaseBusy?"취소 처리 중…":`선택한 ${releasePicked.length}석 배분 취소`}</button></footer></section>:<section className="split-layout allocation-layout"><article className="content-card form-card"><div className="section-title"><div><h2>배부 대상 정보</h2><p>개인과 단체 입력 항목이 자동으로 전환됩니다.</p></div><span className="step-badge">1</span></div><div className="segmented"><button type="button" className={recipientType==="group"?"active":""} onClick={()=>setRecipientType("group")}>단체</button><button type="button" className={recipientType==="individual"?"active":""} onClick={()=>setRecipientType("individual")}>개인</button></div>{recipientType==="group"?<><label className="form-field"><span>단체명 *</span><input value={groupName} onChange={(event)=>setGroupName(event.target.value)} placeholder="단체명을 입력하세요"/></label><label className="form-field"><span>담당자</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="담당자 이름"/></label></>:<label className="form-field"><span>개인 이름 *</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="이름을 입력하세요"/></label>}<label className="form-field"><span>연락처</span><input value={contact} onChange={(event)=>setContact(event.target.value)} placeholder="010-0000-0000"/></label><label className="form-field"><span>메모</span><input value={note} onChange={(event)=>setNote(event.target.value)} placeholder="현장 전달사항을 입력하세요"/></label></article>
       <article className="content-card form-card allocation-seat-card">
         <div className="section-title"><div><h2>실제 좌석 선택</h2><p>구역 또는 열을 선택하면 결번과 배분 완료 좌석은 자동 제외됩니다.</p></div><span className="step-badge">2</span></div>
         <div className="segmented allocation-mode-tabs"><button type="button" className={selectionMode==="zone"?"active":""} onClick={()=>setSelectionMode("zone")}>구역 선택</button><button type="button" className={selectionMode==="row"?"active":""} onClick={()=>setSelectionMode("row")}>열별 선택</button></div>
@@ -593,7 +628,7 @@ function AllocationView({ hall, session, onStats }: { hall: Hall; session: Sessi
           <section className="range-builder" aria-label="사용자 지정 좌석 범위"><div><strong>사용자 지정 범위</strong><span>예: A~K열, 8~14번</span></div><label><span>시작 열</span><select aria-label="범위 시작 열" value={rangeRowStart} onChange={(event)=>setRangeRowStart(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}</option>)}</select></label><label><span>끝 열</span><select aria-label="범위 끝 열" value={rangeRowEnd} onChange={(event)=>setRangeRowEnd(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}</option>)}</select></label><label><span>시작 번호</span><select aria-label="범위 시작 번호" value={rangeNumberStart} onChange={(event)=>setRangeNumberStart(Number(event.target.value))}>{Array.from({length:maxSeatNumber},(_,index)=>index+1).map((number)=><option key={number} value={number}>{number}</option>)}</select></label><label><span>끝 번호</span><select aria-label="범위 끝 번호" value={rangeNumberEnd} onChange={(event)=>setRangeNumberEnd(Number(event.target.value))}>{Array.from({length:maxSeatNumber},(_,index)=>index+1).map((number)=><option key={number} value={number}>{number}</option>)}</select></label><button type="button" className="secondary-button" disabled={!customRangeAvailable.length} onClick={()=>toggleCandidates(customRangeSeats)}>{customRangeAvailable.length}석 범위 추가</button><small>총 {customRangeSeats.length}석 · 배분 완료 {customRangeSeats.length-customRangeAvailable.length}석 자동 제외</small></section>
         </>:<div className="seat-picker seat-picker--allocation">{visibleSeats.map((seat)=>{const unavailable=allocated.get(seat.id);const selected=picked.includes(seat.id);return <button type="button" key={seat.id} disabled={Boolean(unavailable)} title={unavailable?(unavailable.group_name||unavailable.assignee_name||"배분 완료"):seat.label} className={`${selected?"picked":""} ${unavailable?"is-unavailable":""}`} onClick={()=>setPicked((current)=>current.includes(seat.id)?current.filter((id)=>id!==seat.id):[...current,seat.id])}>{seat.row}-{String(seat.number).padStart(2,"0")}<small>{unavailable?"배분 완료":"선택 가능"}</small></button>})}</div>}
         <div className="selection-summary"><span>선택 좌석</span><strong>{picked.length}석</strong><p>{pickedPreview||"좌석을 선택하세요"}{pickedSeats.length>12?` 외 ${pickedSeats.length-12}석`:""}</p></div><button className="primary-button" disabled={busy||loading||!picked.length} onClick={()=>void submit()}>{busy?"DB에 저장 중…":`선택한 ${picked.length}석 배분`}</button>
-      </article></section>
+      </article></section>}
   </div>;
 }
 

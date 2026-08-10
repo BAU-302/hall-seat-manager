@@ -546,7 +546,7 @@ function useSessionRealtime(sessionId: number | null, userId: string | null) {
 function AllocationView({ hall, session, onStats, revision }: { hall: Hall; session: Session; onStats: (distributed: number, entered: number) => void; revision: number }) {
   const { user, requestAuth } = useCatalog();
   const [workflowMode,setWorkflowMode]=useState<"allocate"|"manage">("allocate");
-  const [recipientType,setRecipientType]=useState<"group"|"individual">("group");
+  const [recipientType,setRecipientType]=useState<"group"|"individual"|"onsite">("group");
   const [groupName,setGroupName]=useState("");
   const [assigneeName,setAssigneeName]=useState("");
   const [contact,setContact]=useState("");
@@ -626,10 +626,10 @@ function AllocationView({ hall, session, onStats, revision }: { hall: Hall; sess
   const customRangeAvailable=availableFrom(customRangeSeats);
   const maxSeatNumber=floorCode==="1F"?28:34;
   const pickedPreview=pickedSeats.slice(0,12).map((seat)=>`${seat.floorName} ${seat.row}-${String(seat.number).padStart(2,"0")}`).join(", ");
-  const managedAllocations=seats.flatMap((seat)=>{const record=allocated.get(seat.id);return record&&record.allocation_status==="distributed"?[{seat,record} satisfies ManagedAllocation]:[];}).sort((left,right)=>left.seat.floorCode.localeCompare(right.seat.floorCode)||left.seat.row.localeCompare(right.seat.row)||left.seat.number-right.seat.number);
+  const managedAllocations=seats.flatMap((seat)=>{const record=allocated.get(seat.id);return record&&["distributed","held"].includes(record.allocation_status)?[{seat,record} satisfies ManagedAllocation]:[];}).sort((left,right)=>left.seat.floorCode.localeCompare(right.seat.floorCode)||left.seat.row.localeCompare(right.seat.row)||left.seat.number-right.seat.number);
   const normalizedManagementQuery=managementQuery.trim().toLowerCase().replace(/\s+/g,"");
   const filteredManagedAllocations=managedAllocations.filter(({seat,record})=>!normalizedManagementQuery||[seat.label,`${seat.row}-${seat.number}`,record.group_name,record.assignee_name,record.contact].filter(Boolean).some((value)=>String(value).toLowerCase().replace(/\s+/g,"").includes(normalizedManagementQuery)));
-  const managementGroups=[...filteredManagedAllocations.reduce((groups,item)=>{const recipient=item.record.group_name||item.record.assignee_name||"대상 미입력";const key=`${item.record.group_name?"group":"individual"}:${recipient}`;const current=groups.get(key)??{key,recipient,type:item.record.group_name?"단체":"개인",items:[] as ManagedAllocation[]};current.items.push(item);groups.set(key,current);return groups;},new Map<string,{key:string;recipient:string;type:string;items:ManagedAllocation[]}>()).values()];
+  const managementGroups=[...filteredManagedAllocations.reduce((groups,item)=>{const held=item.record.allocation_status==="held";const recipient=item.record.group_name||item.record.assignee_name||"대상 미입력";const key=`${held?"onsite":item.record.group_name?"group":"individual"}:${recipient}`;const current=groups.get(key)??{key,recipient,type:held?"현장 확보":item.record.group_name?"단체":"개인",items:[] as ManagedAllocation[]};current.items.push(item);groups.set(key,current);return groups;},new Map<string,{key:string;recipient:string;type:string;items:ManagedAllocation[]}>()).values()];
   const selectVisibleAvailable=()=>setPicked((current)=>[...new Set([...current,...visibleSeats.filter((seat)=>!allocated.has(seat.id)).map((seat)=>seat.id)])]);
 
   const submit=async()=>{
@@ -638,19 +638,13 @@ function AllocationView({ hall, session, onStats, revision }: { hall: Hall; sess
     if(recipientType==="individual"&&!assigneeName.trim()){setMessage({tone:"error",text:"개인 이름을 입력해 주세요."});return;}
     if(recipientType==="group"&&!groupName.trim()){setMessage({tone:"error",text:"단체명을 입력해 주세요."});return;}
     setBusy(true);setMessage(null);
-    const {data,error}=await createClient().rpc("allocate_session_seats",{
-      p_session_code:session.id,
-      p_seat_ids:picked,
-      p_recipient_type:recipientType,
-      p_assignee_name:assigneeName.trim()||null,
-      p_group_name:recipientType==="group"?groupName.trim():null,
-      p_contact:contact.trim()||null,
-      p_note:note.trim(),
-    });
+    const {data,error}=recipientType==="onsite"
+      ? await createClient().rpc("reserve_onsite_session_seats",{p_session_code:session.id,p_seat_ids:picked,p_note:note.trim()||"현장 운영용 사전 확보"})
+      : await createClient().rpc("allocate_session_seats",{p_session_code:session.id,p_seat_ids:picked,p_recipient_type:recipientType,p_assignee_name:assigneeName.trim()||null,p_group_name:recipientType==="group"?groupName.trim():null,p_contact:contact.trim()||null,p_note:note.trim()});
     if(error){setMessage({tone:"error",text:error.message});setBusy(false);return;}
     const count=Number(data??picked.length);
     setPicked([]);
-    setMessage({tone:"success",text:`좌석 ${count}석이 실제 DB에 배분되었습니다.`});
+    setMessage({tone:"success",text:recipientType==="onsite"?`현장 운영 좌석 ${count}석을 확보했습니다.`:`좌석 ${count}석이 실제 DB에 배분되었습니다.`});
     await loadAllocationData();
     setBusy(false);
   };
@@ -804,8 +798,36 @@ function GenerateView({ hall, session, revision }: { hall: Hall; session: Sessio
   </div>;
 }
 
-function ReassignView({ hall }: { hall: Hall }) {
-  return <div className="view"><PageHeader eyebrow={`${hall.name} 관리자 권한`} title="현장 재배정" description="현재 행사 회차의 미입장 또는 회수 가능한 좌석을 배정합니다." /><section className="content-card"><div className="section-title"><div><h2>사용 가능한 좌석</h2><p>기존 배부 기록은 삭제하지 않고 이력에 보존됩니다.</p></div></div><div className="empty-state"><strong>재배정 가능한 좌석이 없습니다</strong><p>실제 좌석 배분 데이터가 생기면 이곳에 표시됩니다.</p></div></section></div>;
+function ReassignView({ hall,session,revision,onStats }: { hall:Hall;session:Session;revision:number;onStats:(distributed:number,entered:number)=>void }) {
+  const {user,requestAuth}=useCatalog();
+  const [mode,setMode]=useState<"reassign"|"reserve">("reassign");
+  const [seats,setSeats]=useState<AllocationSeat[]>([]);
+  const [records,setRecords]=useState<Map<number,AllocationRecord>>(new Map());
+  const [fromId,setFromId]=useState(0);
+  const [toId,setToId]=useState(0);
+  const [reserveFloor,setReserveFloor]=useState("1F");
+  const [reserveRow,setReserveRow]=useState("A");
+  const [reservePicked,setReservePicked]=useState<number[]>([]);
+  const [reason,setReason]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const [message,setMessage]=useState<{tone:"success"|"error";text:string}|null>(null);
+  const load=async()=>{setLoading(true);try{const result=await fetchAllocationData(hall.id,session.sessionId,Boolean(user));setSeats(result.seats);setRecords(new Map(result.records.map((item)=>[item.seat_id,item])));onStats(result.records.filter((item)=>item.allocation_status==="distributed").length,result.records.filter((item)=>item.admission_status==="entered").length);}catch(error){setMessage({tone:"error",text:error instanceof Error?error.message:"좌석 정보를 불러오지 못했습니다."});}setLoading(false);};
+  useEffect(()=>{let active=true;void fetchAllocationData(hall.id,session.sessionId,Boolean(user)).then((result)=>{if(!active)return;setSeats(result.seats);setRecords(new Map(result.records.map((item)=>[item.seat_id,item])));onStats(result.records.filter((item)=>item.allocation_status==="distributed").length,result.records.filter((item)=>item.admission_status==="entered").length);setLoading(false);}).catch((error:unknown)=>{if(!active)return;setMessage({tone:"error",text:error instanceof Error?error.message:"좌석 정보를 불러오지 못했습니다."});setLoading(false);});return()=>{active=false;};},[hall.id,session.sessionId,user,revision]); // eslint-disable-line react-hooks/exhaustive-deps
+  const assigned=seats.filter((seat)=>records.get(seat.id)?.allocation_status==="distributed");
+  const available=seats.filter((seat)=>!records.has(seat.id)||records.get(seat.id)?.allocation_status==="available");
+  const floors=[...new Set(seats.map((seat)=>seat.floorCode))];
+  const rows=[...new Set(seats.filter((seat)=>seat.floorCode===reserveFloor).map((seat)=>seat.row))].sort();
+  const reserveVisible=available.filter((seat)=>seat.floorCode===reserveFloor&&seat.row===reserveRow);
+  const submitReassign=async()=>{if(!user){requestAuth();return;}if(!fromId||!toId){setMessage({tone:"error",text:"기존 좌석과 새 좌석을 모두 선택해 주세요."});return;}if(!window.confirm("좌석을 변경해도 이미 인쇄된 QR은 그대로 사용할 수 있습니다. 재배정할까요?"))return;setBusy(true);setMessage(null);const {data,error}=await createClient().rpc("reassign_session_seat",{p_session_code:session.id,p_from_seat_id:fromId,p_to_seat_id:toId,p_reason:reason.trim()||"현장 좌석 변경"});if(error)setMessage({tone:"error",text:error.message});else{const result=data as {from_seat_code:string;to_seat_code:string;ticket_code_preserved:boolean};setMessage({tone:"success",text:`${result.from_seat_code} → ${result.to_seat_code} 재배정 완료 · 기존 인쇄 QR 유지`});setFromId(0);setToId(0);setReason("");await load();}setBusy(false);};
+  const submitReserve=async()=>{if(!user){requestAuth();return;}if(!reservePicked.length){setMessage({tone:"error",text:"현장용으로 확보할 좌석을 선택해 주세요."});return;}setBusy(true);setMessage(null);const {data,error}=await createClient().rpc("reserve_onsite_session_seats",{p_session_code:session.id,p_seat_ids:reservePicked,p_note:reason.trim()||"현장 운영용 사전 확보"});if(error)setMessage({tone:"error",text:error.message});else{setMessage({tone:"success",text:`현장 좌석 ${Number(data??reservePicked.length)}석을 확보했습니다.`});setReservePicked([]);setReason("");await load();}setBusy(false);};
+  if(hall.id!=="haeun")return <div className="view"><PageHeader eyebrow={`${hall.name} 관리자 권한`} title="현장 좌석 운영" description="실제 좌석 도면 등록 후 사용할 수 있습니다."/><div className="empty-state content-card"><strong>좌석 도면 준비 중</strong></div></div>;
+  return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="현장 좌석 운영" description="인쇄 QR을 바꾸지 않고 좌석을 재배정하거나, 현장 대응 좌석을 미리 확보합니다."/>
+    <div className="qr-mode-tabs"><button className={mode==="reassign"?"active":""} onClick={()=>{setMode("reassign");setMessage(null);}}>좌석 재배정</button><button className={mode==="reserve"?"active":""} onClick={()=>{setMode("reserve");setMessage(null);}}>현장 좌석 확보</button></div>
+    {message&&<p className={`allocation-message allocation-message--${message.tone}`} role="status">{message.text}</p>}
+    {mode==="reassign"?<section className="split-layout reassign-layout"><article className="content-card form-card"><div className="section-title"><div><h2>기존 배정 좌석</h2><p>입장 여부와 관계없이 좌석 위치만 옮기며 QR 식별값은 유지됩니다.</p></div><span className="step-badge">1</span></div><label className="form-field"><span>변경할 좌석</span><select value={fromId} onChange={(event)=>setFromId(Number(event.target.value))}><option value={0}>좌석을 선택하세요</option>{assigned.map((seat)=>{const record=records.get(seat.id);return <option key={seat.id} value={seat.id}>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")} · {record?.group_name||record?.assignee_name||"배분 완료"}{record?.admission_status==="entered"?" · 입장 완료":""}</option>})}</select></label><div className="qr-generation-note"><strong>인쇄 QR 유지</strong><p>재배정 후에도 기존 티켓 QR을 스캔하면 새 좌석으로 조회되어 입장 처리됩니다.</p></div></article><article className="content-card form-card"><div className="section-title"><div><h2>새 좌석 선택</h2><p>미배정 좌석만 선택할 수 있습니다.</p></div><span className="step-badge">2</span></div><label className="form-field"><span>새 좌석</span><select value={toId} onChange={(event)=>setToId(Number(event.target.value))}><option value={0}>좌석을 선택하세요</option>{available.map((seat)=><option key={seat.id} value={seat.id}>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")}</option>)}</select></label><label className="form-field"><span>재배정 사유</span><input value={reason} onChange={(event)=>setReason(event.target.value)} maxLength={500} placeholder="예: 시야 확보를 위한 현장 변경"/></label><button className="primary-button" disabled={busy||loading||!fromId||!toId} onClick={()=>void submitReassign()}>{busy?"재배정 중…":"QR 유지하고 좌석 재배정"}</button></article></section>
+    :<section className="content-card onsite-reserve-card"><div className="section-title"><div><h2>현장 대응 좌석 사전 확보</h2><p>관람 지원·초청·진행요원용 좌석을 일반 배분 전에 확보합니다.</p></div><span className="step-badge">{reservePicked.length}</span></div><div className="inline-controls"><select aria-label="층" value={reserveFloor} onChange={(event)=>{const next=event.target.value;setReserveFloor(next);setReserveRow(next==="1F"?"A":"A");setReservePicked([]);}}>{floors.map((item)=><option key={item}>{item}</option>)}</select><select aria-label="열" value={reserveRow} onChange={(event)=>setReserveRow(event.target.value)}>{rows.map((item)=><option key={item}>{item}열</option>)}</select><button className="secondary-button" onClick={()=>setReservePicked(reserveVisible.map((seat)=>seat.id))}>현재 열 전체 선택</button><button className="secondary-button" onClick={()=>setReservePicked([])}>선택 해제</button></div><div className="seat-picker seat-picker--allocation">{reserveVisible.map((seat)=>{const picked=reservePicked.includes(seat.id);return <button type="button" key={seat.id} className={picked?"picked":""} onClick={()=>setReservePicked((current)=>picked?current.filter((id)=>id!==seat.id):[...current,seat.id])}>{seat.row}-{String(seat.number).padStart(2,"0")}<small>{picked?"확보 선택":"선택 가능"}</small></button>})}</div><label className="form-field"><span>확보 메모</span><input value={reason} onChange={(event)=>setReason(event.target.value)} maxLength={500} placeholder="예: 현장 관람 지원 6석"/></label><button className="primary-button" disabled={busy||loading||!reservePicked.length} onClick={()=>void submitReserve()}>{busy?"확보 중…":`선택한 ${reservePicked.length}석 현장 확보`}</button></section>}
+  </div>;
 }
 
 function HistoryView({ hall, session }: { hall: Hall; session: Session }) {
@@ -856,6 +878,7 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
   const [seatStates,setSeatStates]=useState<Map<string,SeatMapState>>(new Map());
   const [stateLoading,setStateLoading]=useState(Boolean(user));
   const [admissionBusy,setAdmissionBusy]=useState(false);
+  const [quickAdmission,setQuickAdmission]=useState(false);
   const [message,setMessage]=useState<{tone:"success"|"error";text:string}|null>(null);
   useEffect(()=>{
     if(hall.id!=="haeun"||!user)return;
@@ -866,10 +889,9 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
       const next=new Map<string,SeatMapState>();
       seats.forEach((seat)=>{
         const record=recordsBySeat.get(seat.id);
-        if(!record||record.allocation_status==="available")return;
         next.set(`${seat.floorCode}-${seat.row}-${seat.number}`,{
-          status:record.admission_status==="entered"?"entered":record.allocation_status==="distributed"?"distributed":"onsite",
-          recipient:record.group_name||record.assignee_name,
+          status:!record||record.allocation_status==="available"?"empty":record.admission_status==="entered"?"entered":record.allocation_status==="distributed"?"distributed":"onsite",
+          recipient:record?.group_name||record?.assignee_name||null,
           seatId:seat.id,
         });
       });
@@ -886,31 +908,33 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
   const seatCount=floor==='1층'?506:numberedSeatCount;
   const queryId=query.trim().toUpperCase().replace(/\s+/g,'').replace(/^([A-T])-?(\d{1,2})$/,(_match: string,row: string,number: string)=>`${row}-${String(Number(number)).padStart(2,'0')}`);
   const selectedState=selected?resolveSeatState(selected.row,selected.number):null;
-  const canAdmit=Boolean(user&&selectedState?.seatId&&selectedState.status==="distributed"&&realtimeStatus!=="offline");
+  const canAdmit=Boolean(user&&selectedState?.seatId&&selectedState.status!=="entered"&&realtimeStatus!=="offline");
   const selectFloor=(label: Floor)=>{setFloor(label);setQuery('');setConfirmed(false);setSelected(null);setMessage(null);};
   const handleSearch=(event: FormEvent<HTMLFormElement>)=>{event.preventDefault();rows.forEach((config)=>config.blocks.forEach((range)=>{if(!range)return;const [start,end]=range;for(let number=start;number<=end;number+=1){const id=`${config.row}-${String(number).padStart(2,'0')}`;if(id===queryId){const state=resolveSeatState(config.row,number);setSelected({id,row:config.row,number,status:state.status,recipient:state.recipient});setConfirmed(false);}}}));};
-  const admitSelected=async()=>{
+  const admitSeat=async(target:Seat,targetState:SeatMapState)=>{
     if(!user){requestAuth();return;}
-    if(!selected||!selectedState?.seatId||selectedState.status!=="distributed")return;
+    if(!targetState.seatId||targetState.status==="entered")return;
     if(realtimeStatus==="offline"){setMessage({tone:"error",text:"네트워크 연결을 확인한 뒤 다시 시도해 주세요."});return;}
     setAdmissionBusy(true);
     setMessage(null);
-    const {data,error}=await createClient().rpc("operate_session_admissions",{p_session_code:session.id,p_seat_ids:[selectedState.seatId],p_mode:"admit",p_entrance_name:"태블릿 좌석표",p_reason:""});
+    const {data,error}=await createClient().rpc("admit_session_seat",{p_session_code:session.id,p_seat_id:targetState.seatId,p_entrance_name:quickAdmission?"태블릿 빠른 입장":"태블릿 좌석표"});
     if(error){setMessage({tone:"error",text:error.message});setAdmissionBusy(false);return;}
-    const key=`${floorCode}-${selected.row}-${selected.number}`;
-    setSeatStates((current)=>{const next=new Map(current);next.set(key,{...selectedState,status:"entered"});return next;});
-    setSelected((current)=>current?{...current,status:"entered"}:current);
+    const key=`${floorCode}-${target.row}-${target.number}`;
+    setSeatStates((current)=>{const next=new Map(current);next.set(key,{...targetState,status:"entered",recipient:targetState.recipient||"현장 입장"});return next;});
+    setSelected({...target,status:"entered",recipient:targetState.recipient||"현장 입장"});
     setConfirmed(true);
-    setMessage({tone:"success",text:`${floor} ${selected.id} 좌석의 입장이 완료되었습니다.`});
+    setMessage({tone:"success",text:`${floor} ${target.id} 좌석의 입장이 완료되었습니다.${targetState.status==="empty"?" 미배정 좌석은 현장 입장으로 기록했습니다.":""}`});
     try{const stats=await fetchSessionStats(session.sessionId);onStats(stats.distributed,stats.entered);}catch{/* 실시간 재조회가 통계를 보완합니다. */}
     void data;
     setAdmissionBusy(false);
   };
+  const admitSelected=async()=>{if(selected&&selectedState)await admitSeat(selected,selectedState);};
+  const handleMapSeat=(seat:Seat)=>{const state=resolveSeatState(seat.row,seat.number);setSelected(seat);setConfirmed(false);setMessage(null);if(quickAdmission&&!admissionBusy&&state.status!=="entered")void admitSeat(seat,state);};
   return <div className="view view--seats"><PageHeader eyebrow="실시간 좌석 운영" title={`${floor} 좌석 현황`} description={!user?"직원 로그인 후 실제 배분 상태를 확인할 수 있습니다.":stateLoading?"배분 상태를 불러오는 중입니다.":`${session.event} 배분 상태가 반영되었습니다.`} />
-    <section className="toolbar" aria-label="좌석 도구"><div className="floor-tabs">{(['1층','2층'] as Floor[]).map(label=><button key={label} className={floor===label?'active':''} onClick={()=>selectFloor(label)}>{label}</button>)}</div><form className="search" onSubmit={handleSearch}><label htmlFor="seat-search">좌석 검색</label><input id="seat-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="예: C-12"/><button>찾기</button></form><div className="legend">{STATUS.map(status=><span key={status}><i className={`dot dot--${status}`}/>{STATUS_LABEL[status]}</span>)}</div></section>
-    <section className={`map-panel map-panel--${floor==='1층'?'one':'two'}`}>{floor==='1층'?<FirstFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={seat=>{setSelected(seat);setConfirmed(false);setMessage(null)}}/>:<SecondFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={seat=>{setSelected(seat);setConfirmed(false);setMessage(null)}}/>}</section>
+    <section className="toolbar" aria-label="좌석 도구"><div className="floor-tabs">{(['1층','2층'] as Floor[]).map(label=><button key={label} className={floor===label?'active':''} onClick={()=>selectFloor(label)}>{label}</button>)}</div><button type="button" className={`quick-admission-toggle ${quickAdmission?"active":""}`} aria-pressed={quickAdmission} disabled={!user||realtimeStatus==="offline"} onClick={()=>{setQuickAdmission((current)=>!current);setMessage(null);}}><span>빠른 입장</span><strong>{quickAdmission?"활성화":"비활성화"}</strong></button><form className="search" onSubmit={handleSearch}><label htmlFor="seat-search">좌석 검색</label><input id="seat-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="예: C-12"/><button>찾기</button></form><div className="legend">{STATUS.map(status=><span key={status}><i className={`dot dot--${status}`}/>{STATUS_LABEL[status]}</span>)}</div></section>
+    <section className={`map-panel map-panel--${floor==='1층'?'one':'two'}`}>{floor==='1층'?<FirstFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={handleMapSeat}/>:<SecondFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={handleMapSeat}/>}</section>
     {message&&<p className={`seat-map-message allocation-message allocation-message--${message.tone}`} role="status">{message.text}</p>}
-    <footer className="selection-bar"><div className="seat-total"><strong>{seatCount}</strong><span>도면 표기 {floor} 좌석</span></div><div className="selection-copy"><span>선택 좌석</span><strong>{selected?.id??'좌석을 선택하세요'}</strong>{selectedState&&<em className={`state state--${selectedState.status}`}>{STATUS_LABEL[selectedState.status]}</em>}{selectedState?.recipient&&<small className="selection-recipient">{selectedState.recipient}</small>}</div><button className="confirm" disabled={admissionBusy||!canAdmit} onClick={()=>void admitSelected()}>{admissionBusy?"입장 처리 중…":!user?"직원 로그인 필요":realtimeStatus==="offline"?"연결 확인 필요":selectedState?.status==="entered"?"입장 완료":selectedState?.status==="distributed"?"선택 좌석 입장":selected?"배분되지 않은 좌석":"좌석을 선택하세요"}</button></footer>
+    <footer className="selection-bar"><div className="seat-total"><strong>{seatCount}</strong><span>도면 표기 {floor} 좌석</span></div><div className="selection-copy"><span>{quickAdmission?"빠른 입장 좌석":"선택 좌석"}</span><strong>{selected?.id??'좌석을 선택하세요'}</strong>{selectedState&&<em className={`state state--${selectedState.status}`}>{STATUS_LABEL[selectedState.status]}</em>}{selectedState?.recipient&&<small className="selection-recipient">{selectedState.recipient}</small>}</div><button className="confirm" disabled={quickAdmission||admissionBusy||!canAdmit} onClick={()=>void admitSelected()}>{admissionBusy?"입장 처리 중…":quickAdmission?"좌석 클릭으로 즉시 입장":!user?"직원 로그인 필요":realtimeStatus==="offline"?"연결 확인 필요":selectedState?.status==="entered"?"입장 완료":selectedState?.status==="empty"?"현장 배정 후 입장":selectedState?.status==="onsite"?"확보 좌석 입장":"선택 좌석 입장"}</button></footer>
   </div>;
 }
 
@@ -938,7 +962,7 @@ function SeatManagerAppInner() {
   const visibleMenu=profile?.role==="entrance_staff"?MENU.filter(([id])=>ENTRANCE_MENU_IDS.has(id)):MENU;
   const updateStats=(distributed:number,entered:number)=>setSession((current)=>current?{...current,distributed,entered}:current);
   const dashboardSession=realtime.stats?.sessionId===session.sessionId?{...session,distributed:realtime.stats.distributed,entered:realtime.stats.entered}:session;
-  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={dashboardSession}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='entry')return <EntryView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='scan')return <ScanView hall={hall} session={session} onStats={updateStats}/>;if(active==='generate')return <GenerateView hall={hall} session={session} revision={revision}/>;if(active==='reassign')return <ReassignView hall={hall}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session,revision,realtimeStatus}} onStats={updateStats}/>;};
+  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={dashboardSession}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='entry')return <EntryView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='scan')return <ScanView hall={hall} session={session} onStats={updateStats}/>;if(active==='generate')return <GenerateView hall={hall} session={session} revision={revision}/>;if(active==='reassign')return <ReassignView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session,revision,realtimeStatus}} onStats={updateStats}/>;};
   const operatorName = profile?.displayName || user?.email?.split("@")[0] || "로그인 필요";
   return <main className="tablet-shell"><aside className="sidebar"><button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button><div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div><nav aria-label="주요 메뉴">{visibleMenu.map(([id,label],index)=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><span>{String(index+1).padStart(2,'0')}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div><span className="user-avatar">{operatorName.slice(0,1)}</span><p><strong>{operatorName}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></p></div><button onClick={()=>profile?.role==="super_admin"?setStaffOpen(true):goHome()}>{profile?.role==="super_admin"?"직원 권한 설정":"홀 선택"}</button></div></aside><section className="workspace workspace--context"><OperationContextBar hall={hall} session={session} realtimeStatus={realtimeStatus} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/><div className="workspace-content">{render()}</div></section>{changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>} {staffOpen&&<StaffSettingsModal onClose={()=>setStaffOpen(false)}/>}</main>;
 }

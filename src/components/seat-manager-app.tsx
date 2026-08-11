@@ -8,7 +8,7 @@ import { FALLBACK_HALLS, FALLBACK_SESSIONS } from "@/lib/hall-catalog";
 import type { Hall, HallId, Session } from "@/lib/hall-catalog";
 import { createClient } from "@/lib/supabase/client";
 
-type SeatStatus = "distributed" | "entered" | "empty" | "onsite";
+type SeatStatus = "distributed" | "entered" | "empty" | "onsite" | "blocked";
 type SeatRange = readonly [number, number] | null;
 type RowConfig = { row: string; blocks: SeatRange[] };
 type Floor = "1층" | "2층";
@@ -51,8 +51,8 @@ const ROWS_2F: RowConfig[] = [
   { row: "F", blocks: [[1, 9], [10, 25], [26, 34]] },
 ];
 
-const STATUS: SeatStatus[] = ["distributed", "entered", "empty", "onsite"];
-const STATUS_LABEL: Record<SeatStatus, string> = { distributed: "배부 완료", entered: "입장 완료", empty: "미배분", onsite: "현장 배정" };
+const STATUS: SeatStatus[] = ["distributed", "entered", "empty", "onsite", "blocked"];
+const STATUS_LABEL: Record<SeatStatus, string> = { distributed: "배부 완료", entered: "입장 완료", empty: "미배분", onsite: "현장 확보", blocked: "사용 제외" };
 const SEAT_W = 29;
 const SEAT_H = 18;
 const SEAT_GAP = 2;
@@ -177,9 +177,6 @@ function FirstFloorSvg({ selectedId, queryId, seatState, onSelect }: SeatMapSvgP
         })}
       </g>
 
-      <g className="lobby-mark">
-        <text x="560" y="590">로비</text>
-      </g>
     </svg>
   );
 }
@@ -425,20 +422,33 @@ function PageHeader({ eyebrow, title, description }: { eyebrow: string; title: s
   return <header className="page-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{description && <p className="page-description">{description}</p>}</div><div className="connection"><span />{dataSource === "supabase" ? "Supabase 연결됨" : "미리보기 데이터"}</div></header>;
 }
 
-function DashboardView({ onNavigate, hall, session }: { onNavigate: (menu: MenuId) => void; hall: Hall; session: Session }) {
+type SessionStats = {
+  distributed: number;
+  entered: number;
+  held: number;
+  blocked: number;
+  floorEntered: Record<string, number>;
+};
+
+function DashboardView({ onNavigate, hall, session, stats }: { onNavigate: (menu: MenuId) => void; hall: Hall; session: Session; stats: SessionStats | null }) {
   const { profile }=useCatalog();
   const capacity=hall.capacity;
-  const unused=Math.max(capacity-session.distributed,0);
-  const waiting=Math.max(session.distributed-session.entered,0);
-  const enteredRate=capacity?`${Math.round(session.entered/capacity*100)}%`:'0%';
+  const distributed=stats?.distributed??session.distributed;
+  const entered=stats?.entered??session.entered;
+  const held=stats?.held??0;
+  const blocked=stats?.blocked??0;
+  const operational=Math.max(capacity-blocked,0);
+  const unused=Math.max(operational-distributed-held,0);
+  const waiting=Math.max(distributed-entered,0);
+  const enteredRate=distributed?`${Math.round(entered/distributed*100)}%`:'0%';
   const recent=recentForHall(hall);
   return <div className="view view--dashboard">
     <PageHeader eyebrow={`${hall.name} · ${session.date} ${session.time}`} title="운영 현황" description={`${session.event} ${session.round}의 좌석과 입장 현황입니다.`} />
-    <section className="metric-grid">
-      {[["전체 좌석",capacity,"100%"],["배부 완료",session.distributed,`${Math.round(session.distributed/capacity*100)}%`],["입장 완료",session.entered,enteredRate],["미입장",waiting,`${Math.round(waiting/capacity*100)}%`]].map(([label,value,rate],index)=><article className={`metric-card metric-card--${index}`} key={label}><span>{label}</span><strong>{value}<small>석</small></strong><em>{rate}</em></article>)}
+    <section className="metric-grid metric-grid--operations">
+      {[["운영 가능",operational,`전체 ${capacity} · 제외 ${blocked}`],["배부 완료",distributed,`${operational?Math.round(distributed/operational*100):0}%`],["현장 확보",held,`${unused}석 배정 가능`],["입장 완료",entered,enteredRate],["미입장",waiting,"배부 기준"],["사용 제외",blocked,"운영 정원 제외"]].map(([label,value,rate],index)=><article className={`metric-card metric-card--${index}`} key={label}><span>{label}</span><strong>{value}<small>석</small></strong><em>{rate}</em></article>)}
     </section>
     <section className="dashboard-grid">
-      <article className="content-card progress-card"><div className="section-title"><div><h2>{hall.id==='haeun'?'층별 입장 진행률':'입장 진행률'}</h2><p>현재 선택 회차의 실시간 기준</p></div><button className="text-button" onClick={()=>onNavigate('seats')}>좌석표 보기</button></div>{hall.id==='haeun'?<><div className="floor-progress"><strong>1층</strong><div><i style={{width:'0%'}} /></div><span>0 / 506</span></div><div className="floor-progress"><strong>2층</strong><div><i style={{width:'0%'}} /></div><span>0 / 188</span></div></>:<div className="floor-progress"><strong>1층</strong><div><i style={{width:enteredRate}} /></div><span>{session.entered} / {capacity}</span></div>}<p className="unused-copy">현재 미배분 좌석 {unused}석</p></article>
+      <article className="content-card progress-card"><div className="section-title"><div><h2>{hall.id==='haeun'?'층별 입장 현황':'입장 현황'}</h2><p>현재 선택 회차의 실시간 DB 기준</p></div><button className="text-button" onClick={()=>onNavigate('seats')}>좌석표 보기</button></div>{hall.id==='haeun'?<><div className="floor-progress"><strong>1층</strong><div><i style={{width:`${Math.round((stats?.floorEntered["1F"]??0)/506*100)}%`}} /></div><span>{stats?.floorEntered["1F"]??0} / 506</span></div><div className="floor-progress"><strong>2층</strong><div><i style={{width:`${Math.round((stats?.floorEntered["2F"]??0)/188*100)}%`}} /></div><span>{stats?.floorEntered["2F"]??0} / 188</span></div></>:<div className="floor-progress"><strong>1층</strong><div><i style={{width:enteredRate}} /></div><span>{entered} / {distributed}</span></div>}<p className="unused-copy">현재 배정 가능 {unused}석 · 입장률은 배부 완료 좌석 기준입니다.</p></article>
       <article className="content-card quick-card"><div className="section-title"><div><h2>빠른 실행</h2><p>현장 업무를 바로 시작하세요.</p></div></div><div className="quick-actions">{profile?.role!=="entrance_staff"&&<button onClick={()=>onNavigate('allocation')}>새 좌석 배분</button>}<button onClick={()=>onNavigate('entry')}>수동 입장</button><button onClick={()=>onNavigate('scan')}>QR 빠른 스캔</button>{profile?.role!=="entrance_staff"&&<button onClick={()=>onNavigate('generate')}>QR 생성</button>}</div></article>
       <article className="content-card recent-card"><div className="section-title"><div><h2>최근 입장 내역</h2><p>{hall.name}에서 방금 처리된 좌석입니다.</p></div><button className="text-button" onClick={()=>onNavigate('history')}>전체 보기</button></div>{recent.length ? <div className="activity-list">{recent.map(item=><div key={item[0]}><time>{item[0]}</time><strong>{item[1]}</strong><span>{item[2]}</span><em>{item[3]}</em></div>)}</div> : <div className="compact-empty">아직 처리된 입장 기록이 없습니다.</div>}</article>
     </section>
@@ -493,12 +503,25 @@ async function fetchAllocationData(hallId: HallId, sessionId: number, canReadAll
 }
 
 async function fetchSessionStats(sessionId: number) {
-  const {data,error}=await createClient().from("session_seats").select("allocation_status, admission_status").eq("session_id",sessionId);
+  const {data,error}=await createClient().from("session_seats").select("allocation_status, admission_status, seats!inner(hall_floors!inner(floor_code))").eq("session_id",sessionId);
   if(error)throw error;
-  const records=(data??[]) as Array<{allocation_status:string;admission_status:string}>;
+  const records=(data??[]) as Array<{allocation_status:string;admission_status:string;seats:unknown}>;
+  const floorEntered:Record<string,number>={};
+  records.forEach((record)=>{
+    if(record.admission_status!=="entered")return;
+    const seatRaw=Array.isArray(record.seats)?record.seats[0]:record.seats;
+    if(!seatRaw||typeof seatRaw!=="object")return;
+    const floorRaw=Array.isArray((seatRaw as {hall_floors:unknown}).hall_floors)?(seatRaw as {hall_floors:unknown[]}).hall_floors[0]:(seatRaw as {hall_floors:unknown}).hall_floors;
+    if(!floorRaw||typeof floorRaw!=="object")return;
+    const code=String((floorRaw as {floor_code:string}).floor_code);
+    floorEntered[code]=(floorEntered[code]??0)+1;
+  });
   return {
     distributed:records.filter((record)=>record.allocation_status==="distributed").length,
     entered:records.filter((record)=>record.admission_status==="entered").length,
+    held:records.filter((record)=>record.allocation_status==="held").length,
+    blocked:records.filter((record)=>record.allocation_status==="blocked").length,
+    floorEntered,
   };
 }
 
@@ -506,7 +529,7 @@ function useSessionRealtime(sessionId: number | null, userId: string | null) {
   const [status,setStatus]=useState<RealtimeStatus>(userId?"connecting":"offline");
   const [connectedSessionId,setConnectedSessionId]=useState<number|null>(null);
   const [revision,setRevision]=useState(0);
-  const [stats,setStats]=useState<{sessionId:number;distributed:number;entered:number}|null>(null);
+  const [stats,setStats]=useState<(SessionStats&{sessionId:number})|null>(null);
   useEffect(()=>{
     if(!sessionId||!userId)return;
     const supabase=createClient();
@@ -546,7 +569,8 @@ function useSessionRealtime(sessionId: number | null, userId: string | null) {
 function AllocationView({ hall, session, onStats, revision }: { hall: Hall; session: Session; onStats: (distributed: number, entered: number) => void; revision: number }) {
   const { user, requestAuth } = useCatalog();
   const [workflowMode,setWorkflowMode]=useState<"allocate"|"manage">("allocate");
-  const [recipientType,setRecipientType]=useState<"group"|"individual"|"onsite">("group");
+  const [recipientType,setRecipientType]=useState<"group"|"individual"|"onsite"|"blocked">("group");
+  const [exclusionAction,setExclusionAction]=useState<"block"|"unblock">("block");
   const [groupName,setGroupName]=useState("");
   const [assigneeName,setAssigneeName]=useState("");
   const [contact,setContact]=useState("");
@@ -614,7 +638,7 @@ function AllocationView({ hall, session, onStats, revision }: { hall: Hall; sess
     setRangeNumberEnd(nextFloor==="1F"?14:9);
   };
   const seatsInBounds=(rowStart:string,rowEnd:string,numberStart:number,numberEnd:number)=>seats.filter((seat)=>seat.floorCode===floorCode&&seat.row>=rowStart&&seat.row<=rowEnd&&seat.number>=numberStart&&seat.number<=numberEnd);
-  const availableFrom=(candidates:AllocationSeat[])=>candidates.filter((seat)=>!allocated.has(seat.id));
+  const availableFrom=(candidates:AllocationSeat[])=>candidates.filter((seat)=>recipientType==="blocked"&&exclusionAction==="unblock"?allocated.get(seat.id)?.allocation_status==="blocked":!allocated.has(seat.id));
   const toggleCandidates=(candidates:AllocationSeat[])=>{
     const available=availableFrom(candidates);
     const allSelected=available.length>0&&available.every((seat)=>picked.includes(seat.id));
@@ -630,7 +654,7 @@ function AllocationView({ hall, session, onStats, revision }: { hall: Hall; sess
   const normalizedManagementQuery=managementQuery.trim().toLowerCase().replace(/\s+/g,"");
   const filteredManagedAllocations=managedAllocations.filter(({seat,record})=>!normalizedManagementQuery||[seat.label,`${seat.row}-${seat.number}`,record.group_name,record.assignee_name,record.contact].filter(Boolean).some((value)=>String(value).toLowerCase().replace(/\s+/g,"").includes(normalizedManagementQuery)));
   const managementGroups=[...filteredManagedAllocations.reduce((groups,item)=>{const held=item.record.allocation_status==="held";const recipient=item.record.group_name||item.record.assignee_name||"대상 미입력";const key=`${held?"onsite":item.record.group_name?"group":"individual"}:${recipient}`;const current=groups.get(key)??{key,recipient,type:held?"현장 확보":item.record.group_name?"단체":"개인",items:[] as ManagedAllocation[]};current.items.push(item);groups.set(key,current);return groups;},new Map<string,{key:string;recipient:string;type:string;items:ManagedAllocation[]}>()).values()];
-  const selectVisibleAvailable=()=>setPicked((current)=>[...new Set([...current,...visibleSeats.filter((seat)=>!allocated.has(seat.id)).map((seat)=>seat.id)])]);
+  const selectVisibleAvailable=()=>setPicked((current)=>[...new Set([...current,...availableFrom(visibleSeats).map((seat)=>seat.id)])]);
 
   const submit=async()=>{
     if(!user){requestAuth();return;}
@@ -640,11 +664,13 @@ function AllocationView({ hall, session, onStats, revision }: { hall: Hall; sess
     setBusy(true);setMessage(null);
     const {data,error}=recipientType==="onsite"
       ? await createClient().rpc("reserve_onsite_session_seats",{p_session_code:session.id,p_seat_ids:picked,p_note:note.trim()||"현장 운영용 사전 확보"})
-      : await createClient().rpc("allocate_session_seats",{p_session_code:session.id,p_seat_ids:picked,p_recipient_type:recipientType,p_assignee_name:assigneeName.trim()||null,p_group_name:recipientType==="group"?groupName.trim():null,p_contact:contact.trim()||null,p_note:note.trim()});
+      : recipientType==="blocked"
+        ? await createClient().rpc("set_session_seat_block_status",{p_session_code:session.id,p_seat_ids:picked,p_blocked:exclusionAction==="block",p_reason:note.trim()||(exclusionAction==="block"?"좌석 사용 제외 설정":"좌석 사용 제외 해제")})
+        : await createClient().rpc("allocate_session_seats",{p_session_code:session.id,p_seat_ids:picked,p_recipient_type:recipientType,p_assignee_name:assigneeName.trim()||null,p_group_name:recipientType==="group"?groupName.trim():null,p_contact:contact.trim()||null,p_note:note.trim()});
     if(error){setMessage({tone:"error",text:error.message});setBusy(false);return;}
     const count=Number(data??picked.length);
     setPicked([]);
-    setMessage({tone:"success",text:recipientType==="onsite"?`현장 운영 좌석 ${count}석을 확보했습니다.`:`좌석 ${count}석이 실제 DB에 배분되었습니다.`});
+    setMessage({tone:"success",text:recipientType==="onsite"?`현장 운영 좌석 ${count}석을 확보했습니다.`:recipientType==="blocked"?`좌석 ${count}석의 사용 제외를 ${exclusionAction==="block"?"설정":"해제"}했습니다.`:`좌석 ${count}석이 실제 DB에 배분되었습니다.`});
     await loadAllocationData();
     setBusy(false);
   };
@@ -674,7 +700,7 @@ function AllocationView({ hall, session, onStats, revision }: { hall: Hall; sess
   return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="좌석 배분" description={workflowMode==="allocate"?"개인 또는 단체에 실제 좌석을 배분합니다.":"배분된 좌석을 검색하고 일부 또는 전체를 취소합니다."} />
     <div className="qr-mode-tabs allocation-workflow-tabs"><button type="button" className={workflowMode==="allocate"?"active":""} onClick={()=>setWorkflowMode("allocate")}>새 좌석 배분</button><button type="button" className={workflowMode==="manage"?"active":""} onClick={()=>setWorkflowMode("manage")}>배분 관리 <span>{managedAllocations.length}</span></button></div>
     {message&&<div className={`notice notice--${message.tone}`}>{message.text}</div>}
-    {workflowMode==="manage"?<section className="content-card allocation-management"><div className="management-toolbar"><div><h2>배분 내역</h2><p>좌석번호·단체명·개인명·연락처로 검색할 수 있습니다.</p></div><label className="management-search"><span>배분 검색</span><input aria-label="배분 검색" value={managementQuery} onChange={(event)=>setManagementQuery(event.target.value)} placeholder="예: A-07 또는 학생지원처"/></label><div className="management-actions"><strong>{filteredManagedAllocations.length}석</strong><button type="button" className="secondary-button" onClick={()=>setReleasePicked((current)=>{const targets=filteredManagedAllocations.filter((item)=>item.record.admission_status!=="entered").map((item)=>item.seat.id);return targets.length>0&&targets.every((id)=>current.includes(id))?current.filter((id)=>!targets.includes(id)):[...new Set([...current,...targets])];})}>검색 결과 전체 선택</button><button type="button" className="secondary-button" onClick={()=>setReleasePicked([])}>선택 해제</button></div></div>{!user?<div className="compact-empty">직원 로그인 후 실제 배분 내역을 관리할 수 있습니다.</div>:loading?<div className="compact-empty">배분 내역을 불러오는 중입니다.</div>:managementGroups.length?<div className="allocation-group-list">{managementGroups.map((group)=>{const releasable=group.items.filter((item)=>item.record.admission_status!=="entered");const allSelected=releasable.length>0&&releasable.every((item)=>releasePicked.includes(item.seat.id));return <article key={group.key} className="allocation-group-card"><header><div><span>{group.type}</span><strong>{group.recipient}</strong><small>{group.items[0]?.record.contact||"연락처 없음"}</small></div><div><strong>{group.items.length}석</strong><button type="button" className={allSelected?"active":""} disabled={!releasable.length} onClick={()=>setReleasePicked((current)=>allSelected?current.filter((id)=>!releasable.some((item)=>item.seat.id===id)):[...new Set([...current,...releasable.map((item)=>item.seat.id)])])}>{allSelected?"단체 선택 해제":"단체 전체 선택"}</button></div></header><div className="managed-seat-grid">{group.items.map(({seat,record})=>{const selected=releasePicked.includes(seat.id);const entered=record.admission_status==="entered";return <button type="button" key={seat.id} className={selected?"active":""} disabled={entered} onClick={()=>setReleasePicked((current)=>selected?current.filter((id)=>id!==seat.id):[...current,seat.id])}><strong>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")}</strong><small>{entered?"입장 완료 · 취소 불가":selected?"취소 대상으로 선택됨":"배분 완료"}</small></button>})}</div></article>})}</div>:<div className="compact-empty">검색 조건에 맞는 배분 좌석이 없습니다.</div>}<footer className="release-bar"><div><span>취소 선택</span><strong>{releasePicked.length}석</strong></div><label><span>취소 사유</span><input aria-label="취소 사유" value={releaseReason} onChange={(event)=>setReleaseReason(event.target.value)} placeholder="예: 단체 요청으로 좌석 회수" maxLength={500}/></label><button type="button" className="danger-button" disabled={releaseBusy||!releasePicked.length} onClick={()=>void releaseSelected()}>{releaseBusy?"취소 처리 중…":`선택한 ${releasePicked.length}석 배분 취소`}</button></footer></section>:<section className="split-layout allocation-layout"><article className="content-card form-card"><div className="section-title"><div><h2>배부 대상 정보</h2><p>개인과 단체 입력 항목이 자동으로 전환됩니다.</p></div><span className="step-badge">1</span></div><div className="segmented"><button type="button" className={recipientType==="group"?"active":""} onClick={()=>setRecipientType("group")}>단체</button><button type="button" className={recipientType==="individual"?"active":""} onClick={()=>setRecipientType("individual")}>개인</button></div>{recipientType==="group"?<><label className="form-field"><span>단체명 *</span><input value={groupName} onChange={(event)=>setGroupName(event.target.value)} placeholder="단체명을 입력하세요"/></label><label className="form-field"><span>담당자</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="담당자 이름"/></label></>:<label className="form-field"><span>개인 이름 *</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="이름을 입력하세요"/></label>}<label className="form-field"><span>연락처</span><input value={contact} onChange={(event)=>setContact(event.target.value)} placeholder="010-0000-0000"/></label><label className="form-field"><span>메모</span><input value={note} onChange={(event)=>setNote(event.target.value)} placeholder="현장 전달사항을 입력하세요"/></label></article>
+    {workflowMode==="manage"?<section className="content-card allocation-management"><div className="management-toolbar"><div><h2>배분 내역</h2><p>좌석번호·단체명·개인명·연락처로 검색할 수 있습니다.</p></div><label className="management-search"><span>배분 검색</span><input aria-label="배분 검색" value={managementQuery} onChange={(event)=>setManagementQuery(event.target.value)} placeholder="예: A-07 또는 학생지원처"/></label><div className="management-actions"><strong>{filteredManagedAllocations.length}석</strong><button type="button" className="secondary-button" onClick={()=>setReleasePicked((current)=>{const targets=filteredManagedAllocations.filter((item)=>item.record.admission_status!=="entered").map((item)=>item.seat.id);return targets.length>0&&targets.every((id)=>current.includes(id))?current.filter((id)=>!targets.includes(id)):[...new Set([...current,...targets])];})}>검색 결과 전체 선택</button><button type="button" className="secondary-button" onClick={()=>setReleasePicked([])}>선택 해제</button></div></div>{!user?<div className="compact-empty">직원 로그인 후 실제 배분 내역을 관리할 수 있습니다.</div>:loading?<div className="compact-empty">배분 내역을 불러오는 중입니다.</div>:managementGroups.length?<div className="allocation-group-list">{managementGroups.map((group)=>{const releasable=group.items.filter((item)=>item.record.admission_status!=="entered");const allSelected=releasable.length>0&&releasable.every((item)=>releasePicked.includes(item.seat.id));return <article key={group.key} className="allocation-group-card"><header><div><span>{group.type}</span><strong>{group.recipient}</strong><small>{group.items[0]?.record.contact||"연락처 없음"}</small></div><div><strong>{group.items.length}석</strong><button type="button" className={allSelected?"active":""} disabled={!releasable.length} onClick={()=>setReleasePicked((current)=>allSelected?current.filter((id)=>!releasable.some((item)=>item.seat.id===id)):[...new Set([...current,...releasable.map((item)=>item.seat.id)])])}>{allSelected?"단체 선택 해제":"단체 전체 선택"}</button></div></header><div className="managed-seat-grid">{group.items.map(({seat,record})=>{const selected=releasePicked.includes(seat.id);const entered=record.admission_status==="entered";return <button type="button" key={seat.id} className={selected?"active":""} disabled={entered} onClick={()=>setReleasePicked((current)=>selected?current.filter((id)=>id!==seat.id):[...current,seat.id])}><strong>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")}</strong><small>{entered?"입장 완료 · 취소 불가":selected?"취소 대상으로 선택됨":"배분 완료"}</small></button>})}</div></article>})}</div>:<div className="compact-empty">검색 조건에 맞는 배분 좌석이 없습니다.</div>}<footer className="release-bar"><div><span>취소 선택</span><strong>{releasePicked.length}석</strong></div><label><span>취소 사유</span><input aria-label="취소 사유" value={releaseReason} onChange={(event)=>setReleaseReason(event.target.value)} placeholder="예: 단체 요청으로 좌석 회수" maxLength={500}/></label><button type="button" className="danger-button" disabled={releaseBusy||!releasePicked.length} onClick={()=>void releaseSelected()}>{releaseBusy?"취소 처리 중…":`선택한 ${releasePicked.length}석 배분 취소`}</button></footer></section>:<section className="split-layout allocation-layout"><article className="content-card form-card"><div className="section-title"><div><h2>운영 목적</h2><p>일반 배부·현장 확보·사용 제외를 같은 방식으로 지정합니다.</p></div><span className="step-badge">1</span></div><div className="segmented allocation-purpose-tabs"><button type="button" className={recipientType==="group"?"active":""} onClick={()=>{setRecipientType("group");setPicked([]);}}>단체</button><button type="button" className={recipientType==="individual"?"active":""} onClick={()=>{setRecipientType("individual");setPicked([]);}}>개인</button><button type="button" className={recipientType==="onsite"?"active":""} onClick={()=>{setRecipientType("onsite");setPicked([]);}}>현장 확보</button><button type="button" className={recipientType==="blocked"?"active":""} onClick={()=>{setRecipientType("blocked");setPicked([]);}}>사용 제외</button></div>{recipientType==="group"?<><label className="form-field"><span>단체명 *</span><input value={groupName} onChange={(event)=>setGroupName(event.target.value)} placeholder="단체명을 입력하세요"/></label><label className="form-field"><span>담당자</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="담당자 이름"/></label></>:recipientType==="individual"?<label className="form-field"><span>개인 이름 *</span><input value={assigneeName} onChange={(event)=>setAssigneeName(event.target.value)} placeholder="이름을 입력하세요"/></label>:recipientType==="onsite"?<div className="qr-generation-note"><strong>현장 배정용 좌석</strong><p>구역·열·범위로 미리 확보하고 현장에서 관람객에게 안내합니다.</p></div>:<><div className="segmented"><button type="button" className={exclusionAction==="block"?"active":""} onClick={()=>{setExclusionAction("block");setPicked([]);}}>제외 설정</button><button type="button" className={exclusionAction==="unblock"?"active":""} onClick={()=>{setExclusionAction("unblock");setPicked([]);}}>제외 해제</button></div><div className="qr-generation-note"><strong>회차별 사용 제외</strong><p>기둥·파손·스태프석처럼 배분할 수 없는 좌석을 회색으로 표시합니다.</p></div></>} {recipientType!=="onsite"&&recipientType!=="blocked"&&<label className="form-field"><span>연락처</span><input value={contact} onChange={(event)=>setContact(event.target.value)} placeholder="010-0000-0000"/></label>}<label className="form-field"><span>{recipientType==="blocked"?"설정 사유":"메모"}</span><input value={note} onChange={(event)=>setNote(event.target.value)} placeholder={recipientType==="blocked"?"예: 기둥 인접 좌석":"현장 전달사항을 입력하세요"}/></label></article>
       <article className="content-card form-card allocation-seat-card">
         <div className="section-title"><div><h2>실제 좌석 선택</h2><p>구역 또는 열을 선택하면 결번과 배분 완료 좌석은 자동 제외됩니다.</p></div><span className="step-badge">2</span></div>
         <div className="segmented allocation-mode-tabs"><button type="button" className={selectionMode==="zone"?"active":""} onClick={()=>setSelectionMode("zone")}>구역 선택</button><button type="button" className={selectionMode==="row"?"active":""} onClick={()=>setSelectionMode("row")}>열별 선택</button></div>
@@ -682,8 +708,8 @@ function AllocationView({ hall, session, onStats, revision }: { hall: Hall; sess
         {loading?<div className="compact-empty">좌석 정보를 불러오는 중입니다.</div>:selectionMode==="zone"?<>
           <div className={`zone-grid zone-grid--${floorCode==="1F"?"eight":"three"}`}>{zones.map((zone)=>{const candidates=seatsInBounds(zone.rowStart,zone.rowEnd,zone.numberStart,zone.numberEnd);const available=availableFrom(candidates);const selectedCount=available.filter((seat)=>picked.includes(seat.id)).length;const unavailableCount=candidates.length-available.length;const fullySelected=available.length>0&&selectedCount===available.length;return <button type="button" key={zone.id} className={`zone-card ${fullySelected?"active":""}`} disabled={!available.length} onClick={()=>toggleCandidates(candidates)}><span>{zone.description}</span><strong>{zone.label}</strong><small>{zone.rowStart}~{zone.rowEnd}열 · {zone.numberStart}~{zone.numberEnd}번</small><em>{selectedCount?`${selectedCount}/${available.length}석 선택`:`${available.length}석 선택 가능`}{unavailableCount?` · ${unavailableCount}석 제외`:""}</em></button>})}</div>
           <section className="range-builder" aria-label="사용자 지정 좌석 범위"><div><strong>사용자 지정 범위</strong><span>예: A~K열, 8~14번</span></div><label><span>시작 열</span><select aria-label="범위 시작 열" value={rangeRowStart} onChange={(event)=>setRangeRowStart(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}</option>)}</select></label><label><span>끝 열</span><select aria-label="범위 끝 열" value={rangeRowEnd} onChange={(event)=>setRangeRowEnd(event.target.value)}>{rows.map((label)=><option key={label} value={label}>{label}</option>)}</select></label><label><span>시작 번호</span><select aria-label="범위 시작 번호" value={rangeNumberStart} onChange={(event)=>setRangeNumberStart(Number(event.target.value))}>{Array.from({length:maxSeatNumber},(_,index)=>index+1).map((number)=><option key={number} value={number}>{number}</option>)}</select></label><label><span>끝 번호</span><select aria-label="범위 끝 번호" value={rangeNumberEnd} onChange={(event)=>setRangeNumberEnd(Number(event.target.value))}>{Array.from({length:maxSeatNumber},(_,index)=>index+1).map((number)=><option key={number} value={number}>{number}</option>)}</select></label><button type="button" className="secondary-button" disabled={!customRangeAvailable.length} onClick={()=>toggleCandidates(customRangeSeats)}>{customRangeAvailable.length}석 범위 추가</button><small>총 {customRangeSeats.length}석 · 배분 완료 {customRangeSeats.length-customRangeAvailable.length}석 자동 제외</small></section>
-        </>:<div className="seat-picker seat-picker--allocation">{visibleSeats.map((seat)=>{const unavailable=allocated.get(seat.id);const selected=picked.includes(seat.id);return <button type="button" key={seat.id} disabled={Boolean(unavailable)} title={unavailable?(unavailable.group_name||unavailable.assignee_name||"배분 완료"):seat.label} className={`${selected?"picked":""} ${unavailable?"is-unavailable":""}`} onClick={()=>setPicked((current)=>current.includes(seat.id)?current.filter((id)=>id!==seat.id):[...current,seat.id])}>{seat.row}-{String(seat.number).padStart(2,"0")}<small>{unavailable?"배분 완료":"선택 가능"}</small></button>})}</div>}
-        <div className="selection-summary"><span>선택 좌석</span><strong>{picked.length}석</strong><p>{pickedPreview||"좌석을 선택하세요"}{pickedSeats.length>12?` 외 ${pickedSeats.length-12}석`:""}</p></div><button className="primary-button" disabled={busy||loading||!picked.length} onClick={()=>void submit()}>{busy?"DB에 저장 중…":`선택한 ${picked.length}석 배분`}</button>
+        </>:<div className="seat-picker seat-picker--allocation">{visibleSeats.map((seat)=>{const record=allocated.get(seat.id);const selectable=availableFrom([seat]).length>0;const selected=picked.includes(seat.id);return <button type="button" key={seat.id} disabled={!selectable} title={record?(record.allocation_status==="blocked"?"사용 제외":record.group_name||record.assignee_name||"배분 완료"):seat.label} className={`${selected?"picked":""} ${!selectable?"is-unavailable":""}`} onClick={()=>setPicked((current)=>current.includes(seat.id)?current.filter((id)=>id!==seat.id):[...current,seat.id])}>{seat.row}-{String(seat.number).padStart(2,"0")}<small>{selectable?(recipientType==="blocked"&&exclusionAction==="unblock"?"제외 해제":"선택 가능"):record?.allocation_status==="blocked"?"사용 제외":"배분 완료"}</small></button>})}</div>}
+        <div className="selection-summary"><span>선택 좌석</span><strong>{picked.length}석</strong><p>{pickedPreview||"좌석을 선택하세요"}{pickedSeats.length>12?` 외 ${pickedSeats.length-12}석`:""}</p></div><button className="primary-button" disabled={busy||loading||!picked.length} onClick={()=>void submit()}>{busy?"DB에 저장 중…":recipientType==="onsite"?`선택한 ${picked.length}석 현장 확보`:recipientType==="blocked"?`선택한 ${picked.length}석 제외 ${exclusionAction==="block"?"설정":"해제"}`:`선택한 ${picked.length}석 배분`}</button>
       </article></section>}
   </div>;
 }
@@ -731,6 +757,7 @@ function ScanView({ hall, session, onStats }: { hall: Hall; session: Session; on
   const videoRef=useRef<HTMLVideoElement>(null);
   const controlsRef=useRef<{stop:()=>void}|null>(null);
   const processingRef=useRef(false);
+  const lastCodeRef=useRef<{code:string;at:number}|null>(null);
   const [cameraActive,setCameraActive]=useState(false);
   const [manualCode,setManualCode]=useState("");
   const [entrance,setEntrance]=useState("정문");
@@ -738,17 +765,22 @@ function ScanView({ hall, session, onStats }: { hall: Hall; session: Session; on
   const [pendingOnsite,setPendingOnsite]=useState<OnsiteTicketConfirmation|null>(null);
   const [message,setMessage]=useState<{tone:"success"|"error"|"warning";text:string}|null>(null);
   const [busy,setBusy]=useState(false);
+  const [continuous,setContinuous]=useState(true);
+  const [scanAlert,setScanAlert]=useState<string|null>(null);
   const stopCamera=()=>{controlsRef.current?.stop();controlsRef.current=null;setCameraActive(false);};
   useEffect(()=>()=>{controlsRef.current?.stop();},[]);
   const refreshStats=async()=>{const current=await fetchAllocationData(hall.id,session.sessionId,true);onStats(current.records.filter((record)=>record.allocation_status==="distributed").length,current.records.filter((record)=>record.admission_status==="entered").length);};
-  const processTicket=async(rawCode:string)=>{const code=rawCode.trim();if(processingRef.current||!code)return;if(!user){requestAuth();return;}processingRef.current=true;stopCamera();setBusy(true);setMessage(null);setResult(null);setPendingOnsite(null);const {data,error}=await createClient().rpc("operate_session_ticket",{p_session_code:session.id,p_ticket_code:code,p_entrance_name:entrance.trim()||"정문"});if(error){setMessage({tone:"error",text:error.message});processingRef.current=false;setBusy(false);return;}const checked=data as TicketAdmissionResult|Omit<OnsiteTicketConfirmation,"ticketCode">;setManualCode("");if(checked.status==="onsite_confirmation_required"){setPendingOnsite({...checked,ticketCode:code});setMessage({tone:"warning",text:`${checked.seat_code}은 미배정 좌석입니다. 현장 배정 후 입장할지 확인해 주세요.`});processingRef.current=false;setBusy(false);return;}const admitted=checked as TicketAdmissionResult;setResult(admitted);setMessage({tone:"success",text:`${admitted.seat_code} 좌석 입장이 완료되었습니다.`});try{await refreshStats();}catch{setMessage({tone:"success",text:`${admitted.seat_code} 입장은 완료되었습니다. 현황은 화면을 새로고침하면 반영됩니다.`});}processingRef.current=false;setBusy(false);};
+  const processTicket=async(rawCode:string)=>{const code=rawCode.trim();const now=Date.now();if(processingRef.current||!code)return;if(lastCodeRef.current?.code===code&&now-lastCodeRef.current.at<2500)return;if(!navigator.onLine){stopCamera();setScanAlert("네트워크가 끊어져 스캔을 중지했습니다. 연결 후 다시 시작해 주세요.");return;}if(!user){requestAuth();return;}lastCodeRef.current={code,at:now};processingRef.current=true;setBusy(true);setMessage(null);setPendingOnsite(null);const {data,error}=await createClient().rpc("operate_session_ticket",{p_session_code:session.id,p_ticket_code:code,p_entrance_name:entrance.trim()||"정문"});if(error){stopCamera();setMessage({tone:"error",text:error.message});setScanAlert(error.message);processingRef.current=false;setBusy(false);return;}const checked=data as TicketAdmissionResult|Omit<OnsiteTicketConfirmation,"ticketCode">;setManualCode("");if(checked.status==="onsite_confirmation_required"){stopCamera();setPendingOnsite({...checked,ticketCode:code});setMessage({tone:"warning",text:`${checked.seat_code}은 미배정 좌석입니다. 현장 배정 후 입장할지 확인해 주세요.`});processingRef.current=false;setBusy(false);return;}const admitted=checked as TicketAdmissionResult;setResult(admitted);setMessage({tone:"success",text:`${admitted.seat_code} 좌석 입장이 완료되었습니다.`});if("vibrate" in navigator)navigator.vibrate(70);try{await refreshStats();}catch{setMessage({tone:"success",text:`${admitted.seat_code} 입장은 완료되었습니다. 현황은 화면을 새로고침하면 반영됩니다.`});}processingRef.current=false;setBusy(false);if(!continuous)stopCamera();};
   const confirmOnsite=async()=>{if(!pendingOnsite||processingRef.current)return;processingRef.current=true;setBusy(true);setMessage(null);const {data,error}=await createClient().rpc("confirm_onsite_ticket",{p_session_code:session.id,p_ticket_code:pendingOnsite.ticketCode,p_entrance_name:entrance.trim()||"정문",p_assignee_name:"현장 입장"});if(error){setMessage({tone:"error",text:error.message});processingRef.current=false;setBusy(false);return;}const admitted=data as TicketAdmissionResult;setPendingOnsite(null);setResult(admitted);setMessage({tone:"success",text:`${admitted.seat_code}을 현장 배정하고 입장 처리했습니다.`});try{await refreshStats();}catch{setMessage({tone:"success",text:`${admitted.seat_code} 현장 입장은 완료되었습니다. 현황은 새로고침하면 반영됩니다.`});}processingRef.current=false;setBusy(false);};
+  const undoLast=async()=>{if(!result||busy)return;if(!window.confirm(`${result.seat_code}의 방금 입장을 취소할까요?`))return;setBusy(true);const {error}=await createClient().rpc("operate_session_admissions",{p_session_code:session.id,p_seat_ids:[result.seat_id],p_mode:"undo",p_entrance_name:entrance.trim()||"정문",p_reason:"QR 스캔 최근 입장 취소"});if(error){setMessage({tone:"error",text:error.message});setScanAlert(error.message);}else{setMessage({tone:"success",text:`${result.seat_code} 입장을 취소했습니다.`});setResult(null);await refreshStats();}setBusy(false);};
   const startCamera=async()=>{if(!user){requestAuth();return;}if(!navigator.mediaDevices?.getUserMedia){setMessage({tone:"error",text:"이 브라우저에서는 카메라를 사용할 수 없습니다. 아래 코드 입력을 이용해 주세요."});return;}setMessage(null);setResult(null);setPendingOnsite(null);try{const { BrowserQRCodeReader }=await import("@zxing/browser");if(!videoRef.current)return;const reader=new BrowserQRCodeReader();controlsRef.current=await reader.decodeFromConstraints({audio:false,video:{facingMode:{ideal:"environment"}}},videoRef.current,(scanResult)=>{if(scanResult&&!processingRef.current)void processTicket(scanResult.getText());});setCameraActive(true);}catch(error){stopCamera();setMessage({tone:"error",text:error instanceof Error&&error.name==="NotAllowedError"?"카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라를 허용해 주세요.":"카메라를 시작하지 못했습니다. 코드 직접 입력을 이용해 주세요."});}};
   if(hall.id!=="haeun")return <div className="view"><PageHeader eyebrow="모바일 우선 기능" title="QR 스캔" description={`${hall.name} 좌석 도면과 티켓이 등록된 후 사용할 수 있습니다.`}/><div className="empty-state content-card"><strong>QR 운영 준비 중</strong><p>실제 좌석 등록 후 QR 입장을 연결합니다.</p></div></div>;
-  return <div className="view view--scan"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="QR 빠른 입장" description="배정 좌석은 바로 입장하고, 미배정 좌석은 직원 확인 후 현장 배정과 입장을 함께 처리합니다." />
+  return <div className="view view--scan"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="QR 빠른 입장" description="배정 좌석은 연속 처리하고, 미배정·중복·오류만 확인 화면에서 멈춥니다." />
+    <div className="scan-quick-toolbar"><button type="button" className={`quick-admission-toggle ${continuous?"active":""}`} onClick={()=>setContinuous((value)=>!value)}><span>연속 스캔</span><strong>{continuous?"활성화":"비활성화"}</strong></button>{result&&<button type="button" className="recent-undo" disabled={busy} onClick={()=>void undoLast()}>최근 입장 취소 · {result.seat_code}</button>}</div>
     {message&&<p className={`allocation-message allocation-message--${message.tone}`} role="status">{message.text}</p>}{!user&&<button type="button" className="auth-notice" onClick={requestAuth}>QR 입장 처리는 직원 로그인이 필요합니다. 로그인하기</button>}
-    <section className="scan-layout scan-layout--live"><article className="scanner-card"><div className={`camera-preview ${cameraActive?"is-active":""}`}><video ref={videoRef} muted playsInline aria-label="QR 스캔 카메라"/><div className="scan-corners"><span/><span/><span/><span/></div><p>{cameraActive?"QR을 사각형 안에 맞춰 주세요":"카메라를 시작해 주세요"}</p></div><button type="button" className={cameraActive?"secondary-button":"primary-button"} onClick={()=>cameraActive?stopCamera():void startCamera()}>{cameraActive?"카메라 중지":"QR 카메라 시작"}</button><p className="helper-text">QR을 한 번 인식하면 카메라가 멈춥니다. 미배정 좌석은 확인 버튼을 누르기 전까지 변경되지 않습니다.</p><form className="manual-ticket-form" onSubmit={(event)=>{event.preventDefault();void processTicket(manualCode);}}><label className="form-field"><span>카메라 사용이 어려울 때</span><input value={manualCode} maxLength={300} onChange={(event)=>setManualCode(event.target.value)} placeholder="티켓 코드 직접 입력"/></label><button className="secondary-button" disabled={busy||!manualCode.trim()}>{busy?"확인 중…":"코드 확인"}</button></form></article>
+    <section className="scan-layout scan-layout--live"><article className="scanner-card"><div className={`camera-preview ${cameraActive?"is-active":""}`}><video ref={videoRef} muted playsInline aria-label="QR 스캔 카메라"/><div className="scan-corners"><span/><span/><span/><span/></div><p>{cameraActive?"QR을 사각형 안에 맞춰 주세요":"카메라를 시작해 주세요"}</p></div><button type="button" className={cameraActive?"secondary-button":"primary-button"} onClick={()=>cameraActive?stopCamera():void startCamera()}>{cameraActive?"카메라 중지":"QR 카메라 시작"}</button><p className="helper-text">연속 스캔에서는 성공 후 카메라가 유지됩니다. 같은 QR은 2.5초 동안 중복 인식하지 않습니다.</p><form className="manual-ticket-form" onSubmit={(event)=>{event.preventDefault();void processTicket(manualCode);}}><label className="form-field"><span>카메라 사용이 어려울 때</span><input value={manualCode} maxLength={300} onChange={(event)=>setManualCode(event.target.value)} placeholder="티켓 코드 직접 입력"/></label><button className="secondary-button" disabled={busy||!manualCode.trim()}>{busy?"확인 중…":"코드 확인"}</button></form></article>
       <article className="content-card scan-result"><div className="section-title"><div><h2>입장 확인</h2><p>배정 상태를 확인한 뒤 조건에 맞는 방식으로 처리합니다.</p></div></div>{result?<div className="scan-success"><span>{result.status==="onsite_admitted"?"현장 배정 · 입장 완료":"입장 완료"}</span><strong>{result.seat_code}</strong><h3>{result.group_name||result.assignee_name||"배부 대상 미입력"}</h3><dl><div><dt>층</dt><dd>{result.floor_name}</dd></div><div><dt>입구</dt><dd>{result.entrance_name}</dd></div><div><dt>처리 시각</dt><dd>{new Date(result.admitted_at).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}</dd></div></dl><button type="button" className="primary-button" onClick={()=>{setResult(null);setMessage(null);void startCamera();}}>다음 QR 스캔</button></div>:pendingOnsite?<div className="onsite-confirmation"><span>미배정 좌석</span><strong>{pendingOnsite.seat_code}</strong><h3>이 좌석을 현장 배정으로 입장 처리할까요?</h3><dl><div><dt>층</dt><dd>{pendingOnsite.floor_name}</dd></div><div><dt>배정 구분</dt><dd>현장 입장</dd></div><div><dt>입구</dt><dd>{entrance.trim()||"정문"}</dd></div></dl><p>입장을 누르면 좌석 배정과 입장 처리가 동시에 기록됩니다.</p><div><button type="button" className="secondary-button" disabled={busy} onClick={()=>{setPendingOnsite(null);setMessage(null);void startCamera();}}>취소·다시 스캔</button><button type="button" className="primary-button" disabled={busy} onClick={()=>void confirmOnsite()}>{busy?"처리 중…":"현장 배정 후 입장"}</button></div></div>:<div className="empty-state"><strong>QR을 기다리고 있습니다</strong><p>배정된 QR은 바로 입장 처리되고, 미배정 QR은 확인 화면이 표시됩니다.</p></div>}<label className="form-field scan-entrance"><span>현재 입구</span><input value={entrance} maxLength={100} disabled={cameraActive||busy||Boolean(pendingOnsite)} onChange={(event)=>setEntrance(event.target.value)} placeholder="예: 정문"/></label></article></section>
+    {scanAlert&&<div className="scan-alert-backdrop" role="presentation"><section className="scan-alert" role="alertdialog" aria-modal="true"><strong>QR 처리 확인</strong><p>{scanAlert}</p><button className="primary-button" onClick={()=>{setScanAlert(null);setMessage(null);void startCamera();}}>확인하고 스캔 재개</button></section></div>}
   </div>;
 }
 
@@ -800,14 +832,13 @@ function GenerateView({ hall, session, revision }: { hall: Hall; session: Sessio
 
 function ReassignView({ hall,session,revision,onStats }: { hall:Hall;session:Session;revision:number;onStats:(distributed:number,entered:number)=>void }) {
   const {user,requestAuth}=useCatalog();
-  const [mode,setMode]=useState<"reassign"|"reserve">("reassign");
   const [seats,setSeats]=useState<AllocationSeat[]>([]);
   const [records,setRecords]=useState<Map<number,AllocationRecord>>(new Map());
   const [fromId,setFromId]=useState(0);
   const [toId,setToId]=useState(0);
-  const [reserveFloor,setReserveFloor]=useState("1F");
-  const [reserveRow,setReserveRow]=useState("A");
-  const [reservePicked,setReservePicked]=useState<number[]>([]);
+  const [filterFloor,setFilterFloor]=useState("1F");
+  const [filterRow,setFilterRow]=useState("A");
+  const [query,setQuery]=useState("");
   const [reason,setReason]=useState("");
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -817,16 +848,17 @@ function ReassignView({ hall,session,revision,onStats }: { hall:Hall;session:Ses
   const assigned=seats.filter((seat)=>records.get(seat.id)?.allocation_status==="distributed");
   const available=seats.filter((seat)=>!records.has(seat.id)||records.get(seat.id)?.allocation_status==="available");
   const floors=[...new Set(seats.map((seat)=>seat.floorCode))];
-  const rows=[...new Set(seats.filter((seat)=>seat.floorCode===reserveFloor).map((seat)=>seat.row))].sort();
-  const reserveVisible=available.filter((seat)=>seat.floorCode===reserveFloor&&seat.row===reserveRow);
+  const rows=[...new Set(seats.filter((seat)=>seat.floorCode===filterFloor).map((seat)=>seat.row))].sort();
+  const normalized=query.trim().toLowerCase().replace(/\s+/g,"");
+  const matches=(seat:AllocationSeat)=>seat.floorCode===filterFloor&&seat.row===filterRow&&(!normalized||[seat.label,`${seat.row}-${seat.number}`,records.get(seat.id)?.group_name,records.get(seat.id)?.assignee_name].filter(Boolean).some((value)=>String(value).toLowerCase().replace(/\s+/g,"").includes(normalized)));
+  const assignedVisible=assigned.filter(matches);
+  const availableVisible=available.filter(matches);
   const submitReassign=async()=>{if(!user){requestAuth();return;}if(!fromId||!toId){setMessage({tone:"error",text:"기존 좌석과 새 좌석을 모두 선택해 주세요."});return;}if(!window.confirm("좌석을 변경해도 이미 인쇄된 QR은 그대로 사용할 수 있습니다. 재배정할까요?"))return;setBusy(true);setMessage(null);const {data,error}=await createClient().rpc("reassign_session_seat",{p_session_code:session.id,p_from_seat_id:fromId,p_to_seat_id:toId,p_reason:reason.trim()||"현장 좌석 변경"});if(error)setMessage({tone:"error",text:error.message});else{const result=data as {from_seat_code:string;to_seat_code:string;ticket_code_preserved:boolean};setMessage({tone:"success",text:`${result.from_seat_code} → ${result.to_seat_code} 재배정 완료 · 기존 인쇄 QR 유지`});setFromId(0);setToId(0);setReason("");await load();}setBusy(false);};
-  const submitReserve=async()=>{if(!user){requestAuth();return;}if(!reservePicked.length){setMessage({tone:"error",text:"현장용으로 확보할 좌석을 선택해 주세요."});return;}setBusy(true);setMessage(null);const {data,error}=await createClient().rpc("reserve_onsite_session_seats",{p_session_code:session.id,p_seat_ids:reservePicked,p_note:reason.trim()||"현장 운영용 사전 확보"});if(error)setMessage({tone:"error",text:error.message});else{setMessage({tone:"success",text:`현장 좌석 ${Number(data??reservePicked.length)}석을 확보했습니다.`});setReservePicked([]);setReason("");await load();}setBusy(false);};
   if(hall.id!=="haeun")return <div className="view"><PageHeader eyebrow={`${hall.name} 관리자 권한`} title="현장 좌석 운영" description="실제 좌석 도면 등록 후 사용할 수 있습니다."/><div className="empty-state content-card"><strong>좌석 도면 준비 중</strong></div></div>;
-  return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="현장 좌석 운영" description="인쇄 QR을 바꾸지 않고 좌석을 재배정하거나, 현장 대응 좌석을 미리 확보합니다."/>
-    <div className="qr-mode-tabs"><button className={mode==="reassign"?"active":""} onClick={()=>{setMode("reassign");setMessage(null);}}>좌석 재배정</button><button className={mode==="reserve"?"active":""} onClick={()=>{setMode("reserve");setMessage(null);}}>현장 좌석 확보</button></div>
+  return <div className="view"><PageHeader eyebrow={`${hall.name} · ${session.event}`} title="현장 좌석 재배정" description="이미 인쇄한 QR은 그대로 유지하면서 실제 관람 좌석만 변경합니다."/>
     {message&&<p className={`allocation-message allocation-message--${message.tone}`} role="status">{message.text}</p>}
-    {mode==="reassign"?<section className="split-layout reassign-layout"><article className="content-card form-card"><div className="section-title"><div><h2>기존 배정 좌석</h2><p>입장 여부와 관계없이 좌석 위치만 옮기며 QR 식별값은 유지됩니다.</p></div><span className="step-badge">1</span></div><label className="form-field"><span>변경할 좌석</span><select value={fromId} onChange={(event)=>setFromId(Number(event.target.value))}><option value={0}>좌석을 선택하세요</option>{assigned.map((seat)=>{const record=records.get(seat.id);return <option key={seat.id} value={seat.id}>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")} · {record?.group_name||record?.assignee_name||"배분 완료"}{record?.admission_status==="entered"?" · 입장 완료":""}</option>})}</select></label><div className="qr-generation-note"><strong>인쇄 QR 유지</strong><p>재배정 후에도 기존 티켓 QR을 스캔하면 새 좌석으로 조회되어 입장 처리됩니다.</p></div></article><article className="content-card form-card"><div className="section-title"><div><h2>새 좌석 선택</h2><p>미배정 좌석만 선택할 수 있습니다.</p></div><span className="step-badge">2</span></div><label className="form-field"><span>새 좌석</span><select value={toId} onChange={(event)=>setToId(Number(event.target.value))}><option value={0}>좌석을 선택하세요</option>{available.map((seat)=><option key={seat.id} value={seat.id}>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")}</option>)}</select></label><label className="form-field"><span>재배정 사유</span><input value={reason} onChange={(event)=>setReason(event.target.value)} maxLength={500} placeholder="예: 시야 확보를 위한 현장 변경"/></label><button className="primary-button" disabled={busy||loading||!fromId||!toId} onClick={()=>void submitReassign()}>{busy?"재배정 중…":"QR 유지하고 좌석 재배정"}</button></article></section>
-    :<section className="content-card onsite-reserve-card"><div className="section-title"><div><h2>현장 대응 좌석 사전 확보</h2><p>관람 지원·초청·진행요원용 좌석을 일반 배분 전에 확보합니다.</p></div><span className="step-badge">{reservePicked.length}</span></div><div className="inline-controls"><select aria-label="층" value={reserveFloor} onChange={(event)=>{const next=event.target.value;setReserveFloor(next);setReserveRow(next==="1F"?"A":"A");setReservePicked([]);}}>{floors.map((item)=><option key={item}>{item}</option>)}</select><select aria-label="열" value={reserveRow} onChange={(event)=>setReserveRow(event.target.value)}>{rows.map((item)=><option key={item}>{item}열</option>)}</select><button className="secondary-button" onClick={()=>setReservePicked(reserveVisible.map((seat)=>seat.id))}>현재 열 전체 선택</button><button className="secondary-button" onClick={()=>setReservePicked([])}>선택 해제</button></div><div className="seat-picker seat-picker--allocation">{reserveVisible.map((seat)=>{const picked=reservePicked.includes(seat.id);return <button type="button" key={seat.id} className={picked?"picked":""} onClick={()=>setReservePicked((current)=>picked?current.filter((id)=>id!==seat.id):[...current,seat.id])}>{seat.row}-{String(seat.number).padStart(2,"0")}<small>{picked?"확보 선택":"선택 가능"}</small></button>})}</div><label className="form-field"><span>확보 메모</span><input value={reason} onChange={(event)=>setReason(event.target.value)} maxLength={500} placeholder="예: 현장 관람 지원 6석"/></label><button className="primary-button" disabled={busy||loading||!reservePicked.length} onClick={()=>void submitReserve()}>{busy?"확보 중…":`선택한 ${reservePicked.length}석 현장 확보`}</button></section>}
+    <section className="content-card reassign-filter"><div className="inline-controls"><select aria-label="층" value={filterFloor} onChange={(event)=>{const next=event.target.value;setFilterFloor(next);setFilterRow("A");setFromId(0);setToId(0);}}>{floors.map((item)=><option key={item}>{item}</option>)}</select><select aria-label="열" value={filterRow} onChange={(event)=>{setFilterRow(event.target.value);setFromId(0);setToId(0);}}>{rows.map((item)=><option key={item}>{item}열</option>)}</select><input aria-label="재배정 좌석 검색" value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="좌석·단체·이름 검색"/></div><small>층과 열을 먼저 고정한 뒤 좌석 또는 배부 대상을 빠르게 찾을 수 있습니다.</small></section>
+    <section className="split-layout reassign-layout"><article className="content-card form-card"><div className="section-title"><div><h2>기존 배정 좌석</h2><p>입장 여부와 관계없이 좌석 위치만 옮기며 QR 식별값은 유지됩니다.</p></div><span className="step-badge">1</span></div><label className="form-field"><span>변경할 좌석</span><select value={fromId} onChange={(event)=>setFromId(Number(event.target.value))}><option value={0}>좌석을 선택하세요</option>{assignedVisible.map((seat)=>{const record=records.get(seat.id);return <option key={seat.id} value={seat.id}>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")} · {record?.group_name||record?.assignee_name||"배분 완료"}{record?.admission_status==="entered"?" · 입장 완료":""}</option>})}</select></label><div className="qr-generation-note"><strong>인쇄 QR 유지</strong><p>재배정 후에도 기존 티켓 QR을 스캔하면 새 좌석으로 조회되어 입장 처리됩니다.</p></div></article><article className="content-card form-card"><div className="section-title"><div><h2>새 좌석 선택</h2><p>같은 필터 안의 미배정 좌석만 선택할 수 있습니다.</p></div><span className="step-badge">2</span></div><label className="form-field"><span>새 좌석</span><select value={toId} onChange={(event)=>setToId(Number(event.target.value))}><option value={0}>좌석을 선택하세요</option>{availableVisible.map((seat)=><option key={seat.id} value={seat.id}>{seat.floorName} {seat.row}-{String(seat.number).padStart(2,"0")}</option>)}</select></label><label className="form-field"><span>재배정 사유</span><input value={reason} onChange={(event)=>setReason(event.target.value)} maxLength={500} placeholder="예: 시야 확보를 위한 현장 변경"/></label><button className="primary-button" disabled={busy||loading||!fromId||!toId} onClick={()=>void submitReassign()}>{busy?"재배정 중…":"QR 유지하고 좌석 재배정"}</button></article></section>
   </div>;
 }
 
@@ -874,12 +906,15 @@ type SeatMapViewProps = {
 };
 
 function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setConfirmed,hall,session,onStats,revision,realtimeStatus }: SeatMapViewProps) {
-  const { user,requestAuth } = useCatalog();
+  const { user,profile,requestAuth } = useCatalog();
   const [seatStates,setSeatStates]=useState<Map<string,SeatMapState>>(new Map());
   const [stateLoading,setStateLoading]=useState(Boolean(user));
   const [admissionBusy,setAdmissionBusy]=useState(false);
   const [quickAdmission,setQuickAdmission]=useState(false);
   const [message,setMessage]=useState<{tone:"success"|"error";text:string}|null>(null);
+  const [mapScale,setMapScale]=useState(1);
+  const [recentAdmission,setRecentAdmission]=useState<{seat:Seat;seatId:number}|null>(null);
+  const canManage=profile?.role==="super_admin"||profile?.role==="event_manager";
   useEffect(()=>{
     if(hall.id!=="haeun"||!user)return;
     let active=true;
@@ -890,7 +925,7 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
       seats.forEach((seat)=>{
         const record=recordsBySeat.get(seat.id);
         next.set(`${seat.floorCode}-${seat.row}-${seat.number}`,{
-          status:!record||record.allocation_status==="available"?"empty":record.admission_status==="entered"?"entered":record.allocation_status==="distributed"?"distributed":"onsite",
+          status:!record||record.allocation_status==="available"?"empty":record.admission_status==="entered"?"entered":record.allocation_status==="blocked"?"blocked":record.allocation_status==="distributed"?"distributed":"onsite",
           recipient:record?.group_name||record?.assignee_name||null,
           seatId:seat.id,
         });
@@ -908,12 +943,13 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
   const seatCount=floor==='1층'?506:numberedSeatCount;
   const queryId=query.trim().toUpperCase().replace(/\s+/g,'').replace(/^([A-T])-?(\d{1,2})$/,(_match: string,row: string,number: string)=>`${row}-${String(Number(number)).padStart(2,'0')}`);
   const selectedState=selected?resolveSeatState(selected.row,selected.number):null;
-  const canAdmit=Boolean(user&&selectedState?.seatId&&selectedState.status!=="entered"&&realtimeStatus!=="offline");
-  const selectFloor=(label: Floor)=>{setFloor(label);setQuery('');setConfirmed(false);setSelected(null);setMessage(null);};
+  const connected=Boolean(user&&realtimeStatus!=="offline");
+  const refreshStats=async()=>{try{const stats=await fetchSessionStats(session.sessionId);onStats(stats.distributed,stats.entered);}catch{/* 실시간 재조회가 통계를 보완합니다. */}};
+  const selectFloor=(label: Floor)=>{setFloor(label);setQuery('');setConfirmed(false);setSelected(null);setMessage(null);setMapScale(1);};
   const handleSearch=(event: FormEvent<HTMLFormElement>)=>{event.preventDefault();rows.forEach((config)=>config.blocks.forEach((range)=>{if(!range)return;const [start,end]=range;for(let number=start;number<=end;number+=1){const id=`${config.row}-${String(number).padStart(2,'0')}`;if(id===queryId){const state=resolveSeatState(config.row,number);setSelected({id,row:config.row,number,status:state.status,recipient:state.recipient});setConfirmed(false);}}}));};
   const admitSeat=async(target:Seat,targetState:SeatMapState)=>{
     if(!user){requestAuth();return;}
-    if(!targetState.seatId||targetState.status==="entered")return;
+    if(!targetState.seatId||targetState.status==="entered"||targetState.status==="blocked")return;
     if(realtimeStatus==="offline"){setMessage({tone:"error",text:"네트워크 연결을 확인한 뒤 다시 시도해 주세요."});return;}
     setAdmissionBusy(true);
     setMessage(null);
@@ -923,18 +959,44 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
     setSeatStates((current)=>{const next=new Map(current);next.set(key,{...targetState,status:"entered",recipient:targetState.recipient||"현장 입장"});return next;});
     setSelected({...target,status:"entered",recipient:targetState.recipient||"현장 입장"});
     setConfirmed(true);
+    setRecentAdmission({seat:{...target,status:"entered",recipient:targetState.recipient||"현장 입장"},seatId:targetState.seatId});
     setMessage({tone:"success",text:`${floor} ${target.id} 좌석의 입장이 완료되었습니다.${targetState.status==="empty"?" 미배정 좌석은 현장 입장으로 기록했습니다.":""}`});
-    try{const stats=await fetchSessionStats(session.sessionId);onStats(stats.distributed,stats.entered);}catch{/* 실시간 재조회가 통계를 보완합니다. */}
+    await refreshStats();
     void data;
     setAdmissionBusy(false);
   };
-  const admitSelected=async()=>{if(selected&&selectedState)await admitSeat(selected,selectedState);};
-  const handleMapSeat=(seat:Seat)=>{const state=resolveSeatState(seat.row,seat.number);setSelected(seat);setConfirmed(false);setMessage(null);if(quickAdmission&&!admissionBusy&&state.status!=="entered")void admitSeat(seat,state);};
+  const undoAdmission=async(target:Seat,seatId:number)=>{
+    if(!connected)return;
+    if(!window.confirm(`${floor} ${target.id} 좌석의 입장 처리를 취소할까요?\n취소 이력은 보존됩니다.`))return;
+    setAdmissionBusy(true);setMessage(null);
+    const {error}=await createClient().rpc("operate_session_admissions",{p_session_code:session.id,p_seat_ids:[seatId],p_mode:"undo",p_entrance_name:"태블릿 좌석표",p_reason:"좌석 현황에서 입장 취소"});
+    if(error){setMessage({tone:"error",text:error.message});setAdmissionBusy(false);return;}
+    const key=`${floorCode}-${target.row}-${target.number}`;
+    setSeatStates((current)=>{const next=new Map(current);const before=current.get(key);next.set(key,{...before,status:"distributed",recipient:before?.recipient??target.recipient??null,seatId});return next;});
+    setSelected({...target,status:"distributed"});setRecentAdmission(null);setMessage({tone:"success",text:`${floor} ${target.id} 좌석의 입장을 취소했습니다.`});await refreshStats();setAdmissionBusy(false);
+  };
+  const releaseSelected=async()=>{
+    if(!selected||!selectedState?.seatId||!canManage)return;
+    if(!window.confirm(`${floor} ${selected.id} 좌석의 ${selectedState.status==="onsite"?"현장 확보":"배분"}를 취소할까요?`))return;
+    setAdmissionBusy(true);setMessage(null);
+    const {error}=await createClient().rpc("release_session_seats",{p_session_code:session.id,p_seat_ids:[selectedState.seatId],p_reason:"좌석 현황에서 배분 취소"});
+    if(error){setMessage({tone:"error",text:error.message});setAdmissionBusy(false);return;}
+    const key=`${floorCode}-${selected.row}-${selected.number}`;setSeatStates((current)=>{const next=new Map(current);next.set(key,{status:"empty",recipient:null,seatId:selectedState.seatId});return next;});setSelected({...selected,status:"empty",recipient:null});setMessage({tone:"success",text:`${floor} ${selected.id} 좌석을 미배분 상태로 되돌렸습니다.`});await refreshStats();setAdmissionBusy(false);
+  };
+  const unblockSelected=async()=>{
+    if(!selected||!selectedState?.seatId||!canManage)return;
+    setAdmissionBusy(true);setMessage(null);
+    const {error}=await createClient().rpc("set_session_seat_block_status",{p_session_code:session.id,p_seat_ids:[selectedState.seatId],p_blocked:false,p_reason:"좌석 현황에서 사용 제외 해제"});
+    if(error){setMessage({tone:"error",text:error.message});setAdmissionBusy(false);return;}
+    const key=`${floorCode}-${selected.row}-${selected.number}`;setSeatStates((current)=>{const next=new Map(current);next.set(key,{status:"empty",recipient:null,seatId:selectedState.seatId});return next;});setSelected({...selected,status:"empty",recipient:null});setMessage({tone:"success",text:`${floor} ${selected.id} 좌석의 사용 제외를 해제했습니다.`});await refreshStats();setAdmissionBusy(false);
+  };
+  const primaryAction=async()=>{if(!selected||!selectedState?.seatId)return;if(selectedState.status==="entered")await undoAdmission(selected,selectedState.seatId);else if(selectedState.status==="blocked")await unblockSelected();else await admitSeat(selected,selectedState);};
+  const handleMapSeat=(seat:Seat)=>{const state=resolveSeatState(seat.row,seat.number);setSelected(seat);setConfirmed(false);setMessage(null);if(quickAdmission&&!admissionBusy&&["empty","distributed","onsite"].includes(state.status))void admitSeat(seat,state);};
+  const primaryLabel=!user?"직원 로그인 필요":realtimeStatus==="offline"?"연결 확인 필요":selectedState?.status==="entered"?"입장 취소":selectedState?.status==="blocked"?(canManage?"사용 제외 해제":"사용 제외 좌석"):selectedState?.status==="empty"?"현장 배정 후 입장":selectedState?.status==="onsite"?"확보 좌석 입장":"선택 좌석 입장";
   return <div className="view view--seats"><PageHeader eyebrow="실시간 좌석 운영" title={`${floor} 좌석 현황`} description={!user?"직원 로그인 후 실제 배분 상태를 확인할 수 있습니다.":stateLoading?"배분 상태를 불러오는 중입니다.":`${session.event} 배분 상태가 반영되었습니다.`} />
-    <section className="toolbar" aria-label="좌석 도구"><div className="floor-tabs">{(['1층','2층'] as Floor[]).map(label=><button key={label} className={floor===label?'active':''} onClick={()=>selectFloor(label)}>{label}</button>)}</div><button type="button" className={`quick-admission-toggle ${quickAdmission?"active":""}`} aria-pressed={quickAdmission} disabled={!user||realtimeStatus==="offline"} onClick={()=>{setQuickAdmission((current)=>!current);setMessage(null);}}><span>빠른 입장</span><strong>{quickAdmission?"활성화":"비활성화"}</strong></button><form className="search" onSubmit={handleSearch}><label htmlFor="seat-search">좌석 검색</label><input id="seat-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="예: C-12"/><button>찾기</button></form><div className="legend">{STATUS.map(status=><span key={status}><i className={`dot dot--${status}`}/>{STATUS_LABEL[status]}</span>)}</div></section>
-    <section className={`map-panel map-panel--${floor==='1층'?'one':'two'}`}>{floor==='1층'?<FirstFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={handleMapSeat}/>:<SecondFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={handleMapSeat}/>}</section>
-    {message&&<p className={`seat-map-message allocation-message allocation-message--${message.tone}`} role="status">{message.text}</p>}
-    <footer className="selection-bar"><div className="seat-total"><strong>{seatCount}</strong><span>도면 표기 {floor} 좌석</span></div><div className="selection-copy"><span>{quickAdmission?"빠른 입장 좌석":"선택 좌석"}</span><strong>{selected?.id??'좌석을 선택하세요'}</strong>{selectedState&&<em className={`state state--${selectedState.status}`}>{STATUS_LABEL[selectedState.status]}</em>}{selectedState?.recipient&&<small className="selection-recipient">{selectedState.recipient}</small>}</div><button className="confirm" disabled={quickAdmission||admissionBusy||!canAdmit} onClick={()=>void admitSelected()}>{admissionBusy?"입장 처리 중…":quickAdmission?"좌석 클릭으로 즉시 입장":!user?"직원 로그인 필요":realtimeStatus==="offline"?"연결 확인 필요":selectedState?.status==="entered"?"입장 완료":selectedState?.status==="empty"?"현장 배정 후 입장":selectedState?.status==="onsite"?"확보 좌석 입장":"선택 좌석 입장"}</button></footer>
+    <section className="toolbar" aria-label="좌석 도구"><div className="floor-tabs">{(['1층','2층'] as Floor[]).map(label=><button key={label} className={floor===label?'active':''} onClick={()=>selectFloor(label)}>{label}</button>)}</div><button type="button" className={`quick-admission-toggle ${quickAdmission?"active":""}`} aria-pressed={quickAdmission} disabled={!user||realtimeStatus==="offline"} onClick={()=>{setQuickAdmission((current)=>!current);setMessage(null);}}><span>빠른 입장</span><strong>{quickAdmission?"활성화":"비활성화"}</strong></button><form className="search" onSubmit={handleSearch}><label htmlFor="seat-search">좌석 검색</label><input id="seat-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="예: C-12"/><button>찾기</button></form><div className="map-zoom-controls" aria-label="좌석표 확대"><button type="button" onClick={()=>setMapScale((value)=>Math.max(1,value-.25))}>−</button><strong>{Math.round(mapScale*100)}%</strong><button type="button" onClick={()=>setMapScale((value)=>Math.min(2.5,value+.25))}>＋</button><button type="button" onClick={()=>setMapScale(1)}>맞춤</button></div>{recentAdmission&&<button type="button" className="recent-undo" onClick={()=>void undoAdmission(recentAdmission.seat,recentAdmission.seatId)}>방금 입장 취소</button>}<div className="legend">{STATUS.map(status=><span key={status}><i className={`dot dot--${status}`}/>{STATUS_LABEL[status]}</span>)}</div></section>
+    <section className={`map-panel map-panel--${floor==='1층'?'one':'two'}`} onWheel={(event)=>{if(!event.ctrlKey&&!event.metaKey)return;event.preventDefault();setMapScale((value)=>Math.min(2.5,Math.max(1,value+(event.deltaY<0?.15:-.15))));}}><div className="seat-map-canvas" style={{width:`${mapScale*100}%`,height:`${mapScale*100}%`}}>{floor==='1층'?<FirstFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={handleMapSeat}/>:<SecondFloorSvg selectedId={selected?.id} queryId={queryId} seatState={resolveSeatState} onSelect={handleMapSeat}/>}</div></section>
+    <footer className="selection-bar"><div className={`selection-message selection-message--${message?.tone??"idle"}`} role="status">{message?<><strong>{message.tone==="success"?"처리 완료":"확인 필요"}</strong><span>{message.text}</span></>:<><strong>{quickAdmission?"빠른 입장 활성화":"좌석 상태 안내"}</strong><span>{quickAdmission?"입장 가능한 좌석을 누르면 즉시 처리됩니다. 취소는 버튼으로만 가능합니다.":"좌석을 선택하면 가능한 처리 버튼이 표시됩니다."}</span></>}</div><div className="seat-total"><strong>{seatCount}</strong><span>도면 표기 {floor} 좌석</span></div><div className="selection-copy"><span>{quickAdmission?"빠른 입장 좌석":"선택 좌석"}</span><strong>{selected?.id??'좌석을 선택하세요'}</strong>{selectedState&&<em className={`state state--${selectedState.status}`}>{STATUS_LABEL[selectedState.status]}</em>}{selectedState?.recipient&&<small className="selection-recipient">{selectedState.recipient}</small>}</div><div className="selection-actions">{canManage&&selectedState&&["distributed","onsite"].includes(selectedState.status)&&<button className="secondary-button" disabled={admissionBusy||selectedState.status==="entered"} onClick={()=>void releaseSelected()}>{selectedState.status==="onsite"?"확보 해제":"배분 취소"}</button>}<button className={`confirm ${selectedState?.status==="entered"?"confirm--danger":""}`} disabled={quickAdmission||admissionBusy||!selectedState?.seatId||!connected||(selectedState.status==="blocked"&&!canManage)} onClick={()=>void primaryAction()}>{admissionBusy?"처리 중…":quickAdmission?"좌석 클릭으로 즉시 입장":primaryLabel}</button></div></footer>
   </div>;
 }
 
@@ -962,7 +1024,7 @@ function SeatManagerAppInner() {
   const visibleMenu=profile?.role==="entrance_staff"?MENU.filter(([id])=>ENTRANCE_MENU_IDS.has(id)):MENU;
   const updateStats=(distributed:number,entered:number)=>setSession((current)=>current?{...current,distributed,entered}:current);
   const dashboardSession=realtime.stats?.sessionId===session.sessionId?{...session,distributed:realtime.stats.distributed,entered:realtime.stats.entered}:session;
-  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={dashboardSession}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='entry')return <EntryView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='scan')return <ScanView hall={hall} session={session} onStats={updateStats}/>;if(active==='generate')return <GenerateView hall={hall} session={session} revision={revision}/>;if(active==='reassign')return <ReassignView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session,revision,realtimeStatus}} onStats={updateStats}/>;};
+  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={dashboardSession} stats={realtime.stats?.sessionId===session.sessionId?realtime.stats:null}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='entry')return <EntryView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='scan')return <ScanView hall={hall} session={session} onStats={updateStats}/>;if(active==='generate')return <GenerateView hall={hall} session={session} revision={revision}/>;if(active==='reassign')return <ReassignView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='history')return <HistoryView hall={hall} session={session}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session,revision,realtimeStatus}} onStats={updateStats}/>;};
   const operatorName = profile?.displayName || user?.email?.split("@")[0] || "로그인 필요";
   return <main className="tablet-shell"><aside className="sidebar"><button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button><div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div><nav aria-label="주요 메뉴">{visibleMenu.map(([id,label],index)=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><span>{String(index+1).padStart(2,'0')}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div><span className="user-avatar">{operatorName.slice(0,1)}</span><p><strong>{operatorName}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></p></div><button onClick={()=>profile?.role==="super_admin"?setStaffOpen(true):goHome()}>{profile?.role==="super_admin"?"직원 권한 설정":"홀 선택"}</button></div></aside><section className="workspace workspace--context"><OperationContextBar hall={hall} session={session} realtimeStatus={realtimeStatus} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/><div className="workspace-content">{render()}</div></section>{changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>} {staffOpen&&<StaffSettingsModal onClose={()=>setStaffOpen(false)}/>}</main>;
 }

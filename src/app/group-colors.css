@@ -90,6 +90,15 @@
 .svg-seat.has-group-color text { fill: var(--seat-group-text); }
 .svg-seat--entered.has-group-color rect { fill: var(--seat-group-color); stroke: #078443; stroke-width: 2.25; }
 
+/* 현장 확보는 단체 색상 데이터가 남아 있어도 고유 주황색을 우선한다. */
+.svg-seat--onsite.has-group-color rect {
+  fill: var(--amber);
+  stroke: #c46c00;
+  stroke-width: .8;
+}
+
+.svg-seat--onsite.has-group-color text { fill: #fff; }
+
 .svg-seat .seat-entry-check {
   fill: none;
   stroke: #078443;

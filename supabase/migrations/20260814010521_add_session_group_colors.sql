@@ -162,7 +162,8 @@ with ranked_groups as (
       order by lower(btrim(session_seat.group_name))
     ) as color_rank
   from public.session_seats session_seat
-  where session_seat.group_name is not null
+  where session_seat.allocation_status = 'distributed'
+    and session_seat.group_name is not null
     and btrim(session_seat.group_name) <> ''
   group by session_seat.session_id, btrim(session_seat.group_name)
 )

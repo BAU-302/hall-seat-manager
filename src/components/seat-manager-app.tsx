@@ -1030,7 +1030,7 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
       const next=new Map<string,SeatMapState>();
       seats.forEach((seat)=>{
         const record=recordsBySeat.get(seat.id);
-        const groupName=record?.group_name?.trim()||null;
+        const groupName=record?.allocation_status==="distributed"?record.group_name?.trim()||null:null;
         next.set(`${seat.floorCode}-${seat.row}-${seat.number}`,{
           status:!record||record.allocation_status==="available"?"empty":record.admission_status==="entered"?"entered":record.allocation_status==="blocked"?"blocked":record.allocation_status==="distributed"?"distributed":"onsite",
           recipient:record?.group_name||record?.assignee_name||null,
@@ -1090,7 +1090,7 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
     const restoredRecord=records.find((record)=>record.seat_id===seatId);
     const restoredStatus:SeatStatus=!restoredRecord||restoredRecord.allocation_status==="available"?"empty":restoredRecord.allocation_status==="held"?"onsite":restoredRecord.allocation_status==="blocked"?"blocked":restoredRecord.admission_status==="entered"?"entered":"distributed";
     const restoredRecipient=restoredRecord?.group_name||restoredRecord?.assignee_name||null;
-    const restoredGroupName=restoredRecord?.group_name?.trim()||null;
+    const restoredGroupName=restoredRecord?.allocation_status==="distributed"?restoredRecord.group_name?.trim()||null:null;
     const restoredGroupColor=restoredGroupName?groupColors.find((item)=>item.group_name.trim().toLocaleLowerCase("ko-KR")===restoredGroupName.toLocaleLowerCase("ko-KR"))?.color_hex??null:null;
     const key=`${floorCode}-${target.row}-${target.number}`;
     setSeatStates((current)=>{const next=new Map(current);next.set(key,{status:restoredStatus,recipient:restoredRecipient,seatId,groupName:restoredGroupName,groupColor:restoredGroupColor});return next;});

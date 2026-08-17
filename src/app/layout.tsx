@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./group-colors.css";
+import "./mobile-layout.css";
 
 export const metadata: Metadata = {
   title: "홀 좌석 현장 운영 시스템",

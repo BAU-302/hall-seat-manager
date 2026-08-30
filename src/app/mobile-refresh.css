@@ -1,0 +1,150 @@
+html,
+body,
+button,
+input,
+select {
+  font-family: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", system-ui, sans-serif;
+}
+
+@media (max-width: 700px) {
+  .workspace--context {
+    grid-template-rows: auto minmax(0, 1fr) 66px;
+  }
+
+  .mobile-navigation-bar {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 0;
+    height: 54px;
+    padding: 0 12px;
+  }
+
+  .mobile-navigation-bar > button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0;
+    border-radius: 0;
+    color: #322a3a;
+    background: transparent;
+  }
+
+  .mobile-navigation-bar > strong {
+    font-size: 17px;
+  }
+
+  .operation-context {
+    min-height: 48px;
+    padding: 8px 14px;
+  }
+
+  [data-active="dashboard"] .operation-context {
+    min-height: 82px;
+    margin: 10px 14px 0;
+    padding: 14px 16px;
+  }
+
+  .view {
+    height: auto;
+    min-height: 100%;
+    padding-bottom: 16px;
+  }
+
+  .view.view--entry {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+    padding-bottom: 16px;
+  }
+
+  .view.view--entry .entry-management-layout {
+    grid-template-rows: none;
+    overflow: visible;
+  }
+
+  .view.view--entry .entry-search-card,
+  .view.view--entry .entry-group-list,
+  .view.view--entry .entry-side,
+  .view.view--entry .recent-entry-card {
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .view.view--seats {
+    display: grid;
+    grid-template-rows: auto minmax(300px, 1fr) auto;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding: 10px;
+  }
+
+  .view--seats .toolbar {
+    max-height: 174px;
+  }
+
+  .view--seats .hall-map-svg {
+    min-width: 100%;
+    transform: none;
+  }
+
+  .view--seats .selection-bar {
+    position: static;
+    grid-template-columns: 1fr;
+  }
+
+  .view--seats .selection-message,
+  .view--seats .selection-actions {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .view--seats .selection-actions .confirm {
+    min-width: 0;
+  }
+
+  .zone-grid--eight {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .mobile-menu-backdrop {
+    background: #fff;
+  }
+
+  .mobile-menu-panel {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    width: 100%;
+    height: 100dvh;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .mobile-menu-panel > header {
+    align-items: center;
+    min-height: 64px;
+    padding: 10px 16px;
+  }
+
+  .mobile-menu-panel > header > button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 0;
+    color: #3a333f;
+    background: transparent;
+  }
+
+  .mobile-menu-panel > footer {
+    display: flex;
+    grid-template-columns: none;
+    gap: 7px;
+    min-height: 46px;
+    margin: 0;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+}

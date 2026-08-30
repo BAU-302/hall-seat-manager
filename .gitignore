@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# local environment files
+.env
+.env.local
+.env.*.local
+
+# logs and test output
+*.log
+coverage/
+
+# editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# TypeScript
+*.tsbuildinfo
+.vercel
+.env*

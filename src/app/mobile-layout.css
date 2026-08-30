@@ -1,0 +1,200 @@
+/* 모바일 메뉴와 세로 화면 스크롤 */
+.workspace-header { min-width: 0; }
+.mobile-navigation-bar,
+.mobile-menu-backdrop { display: none; }
+
+/* 태블릿에서는 실제 1층 도면과 같은 4×2 구역 순서를 유지한다. */
+@media (min-width: 701px) and (max-width: 1180px) {
+  .zone-grid--eight { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (orientation: portrait) and (min-width: 701px) and (max-width: 1180px) {
+  .tablet-shell,
+  .workspace--context { height: 100dvh; min-height: 0; }
+  .workspace-content {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .view:not(.view--seats) {
+    height: max-content;
+    min-height: 100%;
+    overflow: visible;
+    padding-bottom: calc(28px + env(safe-area-inset-bottom));
+  }
+  .view.view--entry {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 14px;
+  }
+  .view--entry .entry-management-layout {
+    grid-template-rows: minmax(0, 1fr) auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .view--entry .entry-search-card,
+  .view--entry .entry-side,
+  .view--entry .recent-entry-card { min-height: 0; }
+  .view--entry .entry-search-card { overflow: hidden; }
+  .view--entry .entry-group-list,
+  .view--entry .recent-entry-card { overflow-y: auto; overscroll-behavior-y: contain; }
+}
+
+@media (max-width: 700px) {
+  html,
+  body { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+  body { display: block; }
+  .tablet-shell,
+  .workspace,
+  .workspace--context { height: 100dvh; min-height: 0; overflow: hidden; }
+  .workspace--context { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+  .workspace-content {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .view {
+    height: max-content;
+    min-height: 100%;
+    overflow: visible;
+    padding-bottom: calc(28px + env(safe-area-inset-bottom));
+  }
+  .view.view--seats,
+  .view.view--entry {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+  .workspace-header { position: relative; z-index: 12; background: #fff; }
+  .mobile-navigation-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 7px 12px;
+    border-bottom: 1px solid #e4dfe7;
+    background: #fff;
+  }
+  .mobile-navigation-bar > button {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 0 13px;
+    border: 0;
+    border-radius: 9px;
+    color: #fff;
+    background: var(--purple-700);
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .mobile-navigation-bar > button span { font-size: 17px; }
+  .mobile-navigation-bar > strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .operation-context { min-height: 48px; padding: 6px 12px; }
+  .operation-context nav { overflow: hidden; }
+  .operation-context .change-context-button { min-height: 36px; padding-inline: 9px; }
+  .view--entry { gap: 9px; padding: 12px; }
+  .view--entry .page-heading { min-height: 46px; }
+  .view--entry .entry-management-layout {
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 9px;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .view--entry .entry-search-card {
+    min-height: 0;
+    overflow: hidden;
+    padding: 13px;
+  }
+  .view--entry .entry-group-list {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+  .view--entry .entry-side {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 9px;
+    min-height: 0;
+  }
+  .view--entry .entry-action-card,
+  .view--entry .recent-entry-card { min-height: 0; padding: 12px; }
+  .view--entry .entry-action-card { gap: 8px; }
+  .view--entry .entry-action-card .section-title,
+  .view--entry .recent-entry-card .section-title { margin-bottom: 8px; }
+  .view--entry .entry-selected-summary { padding: 9px; }
+  .view--entry .entry-action-card .form-field { flex: none; }
+  .view--entry .entry-action-card .primary-button,
+  .view--entry .entry-action-card .danger-button { min-height: 44px; }
+  .view--entry .recent-entry-card { overflow-y: auto; overscroll-behavior-y: contain; }
+  .view--seats .toolbar { flex: none; max-height: 126px; overflow-y: auto; }
+  .view--seats .map-panel { min-height: 0; }
+  .view--seats .selection-bar {
+    position: relative;
+    z-index: 5;
+    bottom: auto;
+    flex: none;
+    grid-template-columns: minmax(0, 1fr) minmax(126px, auto);
+    gap: 8px;
+    padding: 8px;
+  }
+  .view--seats .selection-message { grid-column: 1; }
+  .view--seats .selection-actions { grid-column: 2; width: auto; }
+  .view--seats .selection-actions .confirm { min-width: 126px; }
+  .zone-grid--eight { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mobile-menu-backdrop {
+    position: fixed;
+    z-index: 100;
+    inset: 0;
+    display: block;
+    background: rgba(33, 25, 38, .5);
+  }
+  .mobile-menu-panel {
+    display: flex;
+    flex-direction: column;
+    width: min(86vw, 340px);
+    height: 100dvh;
+    padding: calc(16px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
+    background: #fff;
+    box-shadow: 18px 0 50px rgba(24, 15, 30, .28);
+  }
+  .mobile-menu-panel > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 4px 16px;
+    border-bottom: 1px solid #e8e3ea;
+  }
+  .mobile-menu-panel > header > div { display: flex; min-width: 0; flex-direction: column; }
+  .mobile-menu-panel > header span { color: var(--gray-600); font-size: 9px; font-weight: 850; }
+  .mobile-menu-panel > header strong { margin-top: 4px; color: var(--purple-700); font-size: 19px; }
+  .mobile-menu-panel > header small { overflow: hidden; margin-top: 4px; color: var(--gray-600); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-menu-panel > header > button { width: 44px; height: 44px; border: 0; border-radius: 10px; color: #5e5864; background: var(--gray-100); font-size: 24px; }
+  .mobile-menu-panel > nav { display: grid; gap: 6px; min-height: 0; margin: 14px 0; overflow: auto; }
+  .mobile-menu-panel > nav > button {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 10px;
+    color: #5c5660;
+    background: transparent;
+    text-align: left;
+  }
+  .mobile-menu-panel > nav > button > span { color: #aaa3ae; font-size: 9px; font-weight: 900; }
+  .mobile-menu-panel > nav > button > strong { font-size: 13px; }
+  .mobile-menu-panel > nav > button.active { color: #fff; background: linear-gradient(135deg, var(--purple-700), #9148c4); box-shadow: 0 7px 16px rgba(109, 42, 167, .22); }
+  .mobile-menu-panel > nav > button.active span { color: #eadcf5; }
+  .mobile-menu-panel > footer { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: auto; padding-top: 12px; border-top: 1px solid #e8e3ea; }
+  .mobile-menu-panel > footer > button { min-height: 44px; border: 1px solid #ded9e1; border-radius: 9px; color: var(--purple-700); background: #fff; font-size: 10px; font-weight: 900; }
+  .mobile-menu-panel > footer > button:only-child { grid-column: 1 / -1; }
+}

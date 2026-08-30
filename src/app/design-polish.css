@@ -1,0 +1,1221 @@
+/* 디자인 감사 반영: 기존 시각 언어를 유지한 최종 가독성·밀도 보정 */
+:root {
+  --polish-space-1: 8px;
+  --polish-space-2: 12px;
+  --polish-space-3: 16px;
+  --polish-space-4: 24px;
+  --polish-radius-control: 10px;
+  --polish-radius-card: 14px;
+}
+
+button,
+input,
+select {
+  letter-spacing: -0.01em;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.svg-seat:focus-visible {
+  outline: 3px solid rgba(126, 54, 181, 0.24);
+  outline-offset: 2px;
+}
+
+.empty-state-mark {
+  display: grid;
+  place-items: center;
+  min-width: 52px;
+  height: 52px;
+  margin-bottom: 14px;
+  padding: 0 12px;
+  border-radius: 15px;
+  color: var(--purple-700);
+  background: var(--purple-100);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.auth-empty-state {
+  flex: 1;
+  min-height: 360px;
+  border-style: dashed;
+}
+
+.auth-empty-state strong,
+.event-management-empty strong {
+  font-size: 18px;
+}
+
+.auth-empty-state p,
+.event-management-empty p {
+  max-width: 420px;
+  margin: 8px 0 18px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.auth-empty-state .primary-button {
+  min-width: 150px;
+}
+
+.event-management-empty {
+  min-height: 320px;
+}
+
+/* 태블릿 세로: 데스크톱 축소 대신 읽기 좋은 운영 밀도 */
+@media (min-width: 701px) and (max-width: 1000px) {
+  .tablet-shell {
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    grid-template-columns: 164px minmax(0, 1fr);
+    box-shadow: none;
+  }
+
+  .sidebar {
+    padding: 20px 12px 16px;
+  }
+
+  .brand {
+    gap: 9px;
+    padding-inline: 6px;
+  }
+
+  .brand strong {
+    font-size: 18px;
+  }
+
+  .sidebar nav {
+    gap: 6px;
+  }
+
+  .sidebar nav button {
+    min-height: 48px;
+    padding-inline: 10px;
+    border-radius: 11px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .sidebar nav button span {
+    min-width: 17px;
+    font-size: 10px;
+  }
+
+  .sidebar-bottom p strong {
+    font-size: 13px;
+  }
+
+  .brand small,
+  .sidebar-bottom small,
+  .sidebar-bottom > button {
+    font-size: 11px;
+  }
+
+  .view {
+    gap: 16px;
+    padding: 20px;
+  }
+
+  .view--seats {
+    gap: 12px;
+    padding: 18px;
+  }
+
+  .page-heading {
+    min-height: 60px;
+  }
+
+  .page-heading h1 {
+    font-size: 26px;
+  }
+
+  .eyebrow,
+  .page-description,
+  .connection {
+    font-size: 12px;
+  }
+
+  .content-card,
+  .scanner-card,
+  .metric-card {
+    border-radius: var(--polish-radius-card);
+  }
+
+  .section-title {
+    margin-bottom: 16px;
+  }
+
+  .section-title h2 {
+    font-size: 18px;
+  }
+
+  .section-title p,
+  .unused-copy,
+  .helper-text {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .metric-card > span,
+  .metric-card small,
+  .metric-card em,
+  .floor-progress strong,
+  .floor-progress span,
+  .activity-list > div {
+    font-size: 12px;
+  }
+
+  .metric-card {
+    min-height: 112px;
+    padding: 16px;
+  }
+
+  .metric-card strong {
+    margin-top: 10px;
+    font-size: 29px;
+  }
+
+  .form-field > span,
+  .search label,
+  .history-search label {
+    font-size: 13px;
+  }
+
+  .form-field input,
+  .form-field select,
+  .big-search input,
+  .search input,
+  .history-search input,
+  .reassign-layout select {
+    min-height: 46px;
+    font-size: 14px;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .ghost-button,
+  .text-button,
+  .search button,
+  .history-search button,
+  .floor-tabs button,
+  .segmented button,
+  .qr-mode-tabs button,
+  .filter-chips button,
+  .quick-admission-toggle,
+  .map-zoom-controls button,
+  .group-legend-toggle {
+    min-height: 44px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .toolbar {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .search input {
+    width: 128px;
+  }
+
+  .map-zoom-controls button {
+    min-width: 44px;
+  }
+
+  .map-zoom-controls strong {
+    min-width: 52px;
+    font-size: 12px;
+  }
+
+  .quick-admission-toggle strong,
+  .state,
+  .session-status {
+    font-size: 11px;
+  }
+
+  .allocation-layout,
+  .reassign-layout {
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+    align-items: start;
+  }
+
+  .history-layout {
+    grid-template-columns: minmax(0, 1.3fr) minmax(230px, .7fr);
+  }
+
+  .history-controls {
+    grid-template-columns: 1fr auto;
+  }
+
+  .history-table .history-head,
+  .history-table .history-row {
+    font-size: 12px;
+  }
+
+  .history-table .history-head {
+    font-size: 11px;
+  }
+
+  .history-detail-heading span,
+  .history-detail-heading p,
+  .history-detail dt,
+  .history-detail dd,
+  .history-integrity-note {
+    font-size: 12px;
+  }
+
+  .history-list-card .section-title > small,
+  .history-count span {
+    font-size: 11px;
+  }
+
+  .management-list article {
+    min-height: 104px;
+  }
+
+  .management-list h3 {
+    font-size: 16px;
+  }
+
+  .management-list p,
+  .management-date span {
+    font-size: 12px;
+  }
+}
+
+/* 모바일: 한 손 조작과 밝은 현장 가독성 */
+@media (max-width: 700px) {
+  .mobile-navigation-bar {
+    min-height: 58px;
+    padding-inline: 14px;
+  }
+
+  .mobile-navigation-bar > strong {
+    font-size: 18px;
+  }
+
+  .mobile-header-status {
+    gap: 6px;
+  }
+
+  .mobile-header-status small,
+  .mobile-header-status b {
+    font-size: 10px;
+  }
+
+  .mobile-header-status b {
+    max-width: 72px;
+  }
+
+  .mobile-user-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+
+  .operation-context {
+    min-height: 54px;
+    padding: 8px 14px;
+  }
+
+  .operation-context nav strong {
+    font-size: 13px;
+  }
+
+  .realtime-state,
+  .change-context-button {
+    font-size: 11px;
+  }
+
+  .change-context-button {
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+
+  .view {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .content-card,
+  .scanner-card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .section-title h2 {
+    font-size: 16px;
+  }
+
+  .section-title p,
+  .unused-copy,
+  .helper-text,
+  .qr-generation-note p,
+  .onsite-policy-note p,
+  .compact-empty {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .metric-grid--operations .metric-card > span {
+    font-size: 12px;
+  }
+
+  .metric-grid--operations .metric-card small,
+  .metric-grid--operations .metric-card em,
+  .floor-progress strong,
+  .floor-progress span,
+  .activity-list > div {
+    font-size: 11px;
+  }
+
+  .form-field > span,
+  .search label,
+  .management-search span {
+    font-size: 13px;
+  }
+
+  .form-field input,
+  .form-field select,
+  .big-search input,
+  .search input,
+  .reassign-layout select,
+  .inline-controls select,
+  .inline-controls input {
+    min-height: 48px;
+    font-size: 14px;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .ghost-button,
+  .text-button,
+  .search button,
+  .history-search button,
+  .floor-tabs button,
+  .segmented button,
+  .qr-mode-tabs button,
+  .filter-chips button,
+  .quick-admission-toggle,
+  .map-zoom-controls button,
+  .group-legend-toggle,
+  .recent-undo {
+    min-height: 44px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .view--seats {
+    grid-template-rows: auto minmax(280px, 1fr) auto;
+    gap: 10px;
+  }
+
+  .view--seats .toolbar {
+    max-height: 188px;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .toolbar .search {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 52px;
+    width: 100%;
+  }
+
+  .toolbar .search button {
+    padding-inline: 10px;
+  }
+
+  .toolbar .map-zoom-controls {
+    display: grid;
+    grid-template-columns: 44px 64px 44px minmax(70px, 1fr);
+    gap: 6px;
+    width: 100%;
+  }
+
+  .map-zoom-controls strong {
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+  }
+
+  .view--seats .selection-bar {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .selection-message strong,
+  .selection-copy strong {
+    font-size: 14px;
+  }
+
+  .selection-message span,
+  .selection-copy > span,
+  .selection-recipient,
+  .seat-total span,
+  .state {
+    font-size: 12px;
+  }
+
+  .view--seats .selection-actions .confirm,
+  .view--seats .selection-actions .secondary-button {
+    min-height: 48px;
+    font-size: 13px;
+  }
+
+  .mobile-bottom-nav {
+    height: 70px;
+  }
+
+  .mobile-bottom-nav button {
+    font-size: 10px;
+  }
+
+  .mobile-menu-profile strong {
+    font-size: 16px;
+  }
+
+  .mobile-menu-profile small,
+  .mobile-menu-context span,
+  .mobile-menu-scroll h2,
+  .mobile-menu-scroll nav button small,
+  .mobile-menu-panel > footer {
+    font-size: 12px;
+  }
+
+  .mobile-menu-context strong,
+  .mobile-menu-scroll nav button strong {
+    font-size: 14px;
+  }
+
+  .mobile-menu-context button {
+    min-height: 44px;
+    font-size: 12px;
+  }
+
+  .mobile-menu-scroll nav button {
+    min-height: 64px;
+  }
+
+  .history-controls {
+    padding: 12px;
+  }
+
+  .filter-chips button {
+    white-space: nowrap;
+  }
+
+  .history-table .history-row {
+    min-height: 68px;
+    font-size: 12px;
+  }
+
+  .history-count span,
+  .history-list-card .section-title > small,
+  .history-detail-heading span,
+  .history-detail-heading p,
+  .history-detail dt,
+  .history-detail dd,
+  .history-integrity-note {
+    font-size: 12px;
+  }
+
+  .auth-empty-state {
+    min-height: calc(100dvh - 240px);
+    padding-inline: 24px;
+  }
+
+  .auth-empty-state strong,
+  .event-management-empty strong {
+    font-size: 17px;
+  }
+
+  .auth-empty-state p,
+  .event-management-empty p {
+    font-size: 13px;
+  }
+
+  .view--events > .content-card {
+    min-height: calc(100dvh - 190px);
+  }
+
+  .management-list article {
+    min-height: 112px;
+    padding-block: 14px;
+  }
+
+  .management-list h3 {
+    font-size: 15px;
+  }
+
+  .management-list p,
+  .management-date span {
+    font-size: 12px;
+  }
+
+  .group-color-picker > div:first-child strong,
+  .existing-group-picker > div:first-child strong {
+    font-size: 13px;
+  }
+
+  .group-color-picker > div:first-child span,
+  .group-color-picker > small,
+  .existing-group-picker > div:first-child span,
+  .existing-group-picker > p {
+    font-size: 12px;
+  }
+
+  .group-color-swatches button {
+    min-height: 48px;
+  }
+
+  .group-color-swatches button span,
+  .existing-group-picker > div:nth-child(2) > button strong,
+  .existing-group-picker > div:nth-child(2) > button small {
+    font-size: 11px;
+  }
+}
+
+/* 모바일 가로: 태블릿 사이드바 대신 지도 + 조작 패널을 동시에 유지 */
+@media (orientation: landscape) and (max-width: 900px) and (max-height: 500px) {
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    background: #fff;
+  }
+
+  .tablet-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: none;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .workspace--context {
+    display: grid;
+    grid-template-rows: 48px minmax(0, 1fr) 54px;
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace-header {
+    position: relative;
+    z-index: 12;
+    min-width: 0;
+    background: #fff;
+  }
+
+  .mobile-navigation-bar {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    height: 48px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--mobile-line, #e9e5ec);
+    background: #fff;
+  }
+
+  .mobile-navigation-bar > button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    color: #322a3a;
+    background: transparent;
+  }
+
+  .mobile-navigation-bar > strong {
+    overflow: hidden;
+    font-size: 17px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-header-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .mobile-header-status small,
+  .mobile-header-status b {
+    font-size: 11px;
+  }
+
+  .mobile-user-avatar {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    color: #fff;
+    background: var(--purple-700);
+    font-size: 11px;
+  }
+
+  .operation-context {
+    display: none;
+  }
+
+  .workspace-content {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: #f8f7fa;
+  }
+
+  .view {
+    height: max-content;
+    min-height: 100%;
+    gap: 12px;
+    padding: 12px;
+    overflow: visible;
+  }
+
+  .page-heading {
+    display: none;
+  }
+
+  .mobile-bottom-nav {
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    height: 54px;
+    padding: 2px 8px;
+    border-top: 1px solid var(--mobile-line, #e9e5ec);
+    background: #fff;
+  }
+
+  .mobile-bottom-nav button {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    color: #6b6470;
+    background: transparent;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .mobile-bottom-nav button.active {
+    color: var(--purple-700);
+  }
+
+  .mobile-bottom-nav .mobile-scan-tab svg {
+    width: 38px;
+    height: 38px;
+    margin: 0;
+    padding: 8px;
+    border-radius: 50%;
+    color: #fff;
+    background: var(--purple-700);
+    box-shadow: 0 5px 14px rgba(95, 35, 145, .22);
+  }
+
+  .mobile-bottom-nav .mobile-scan-tab span {
+    color: var(--purple-700);
+  }
+
+  .view--seats {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(286px, .85fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    height: 100%;
+    min-height: 0;
+    gap: 8px;
+    padding: 8px;
+    overflow: hidden;
+  }
+
+  .view--seats .toolbar {
+    grid-column: 2;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: start;
+    gap: 7px;
+    min-height: 0;
+    max-height: none;
+    padding: 9px;
+    overflow-y: auto;
+    border-radius: 10px;
+  }
+
+  .view--seats .toolbar .floor-tabs {
+    grid-column: 1;
+  }
+
+  .view--seats .toolbar .quick-admission-toggle {
+    grid-column: 2;
+  }
+
+  .view--seats .toolbar .search,
+  .view--seats .toolbar .map-zoom-controls {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .view--seats .toolbar .search {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    gap: 6px;
+  }
+
+  .view--seats .toolbar .search label {
+    grid-column: 1 / -1;
+    font-size: 12px;
+  }
+
+  .view--seats .toolbar .search input {
+    width: 100%;
+    min-height: 40px;
+    font-size: 13px;
+  }
+
+  .view--seats .toolbar .search button,
+  .view--seats .toolbar .floor-tabs button,
+  .view--seats .toolbar .quick-admission-toggle,
+  .view--seats .toolbar .map-zoom-controls button {
+    min-height: 40px;
+    font-size: 11px;
+  }
+
+  .view--seats .toolbar .map-zoom-controls {
+    display: grid;
+    grid-template-columns: 40px 54px 40px minmax(64px, 1fr);
+    gap: 5px;
+  }
+
+  .view--seats .toolbar .map-zoom-controls strong {
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+  }
+
+  .view--seats .toolbar .group-legend-control,
+  .view--seats .toolbar .recent-undo {
+    grid-column: 1 / -1;
+  }
+
+  .view--seats .toolbar .legend {
+    display: none;
+  }
+
+  .view--seats .map-panel {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    min-height: 0;
+    border-radius: 10px;
+  }
+
+  .view--seats .hall-map-svg {
+    min-width: 100%;
+    transform: none;
+  }
+
+  .view--seats .selection-bar {
+    grid-column: 2;
+    grid-row: 2;
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+    padding: 9px;
+    border-radius: 10px;
+  }
+
+  .view--seats .selection-message {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .view--seats .selection-message strong,
+  .view--seats .selection-copy strong {
+    font-size: 12px;
+  }
+
+  .view--seats .selection-message span {
+    display: none;
+  }
+
+  .view--seats .selection-message span,
+  .view--seats .selection-copy > span,
+  .view--seats .selection-recipient,
+  .view--seats .state {
+    font-size: 10px;
+  }
+
+  .view--seats .seat-total {
+    display: none;
+  }
+
+  .view--seats .selection-copy {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .view--seats .selection-actions {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    align-self: stretch;
+    display: flex;
+    width: auto;
+  }
+
+  .view--seats .selection-actions .confirm,
+  .view--seats .selection-actions .secondary-button {
+    min-width: 116px;
+    min-height: 42px;
+    padding-inline: 10px;
+    font-size: 11px;
+  }
+
+  .split-layout,
+  .scan-layout,
+  .qr-generation-layout,
+  .reassign-layout,
+  .allocation-layout,
+  .history-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .view--history {
+    height: 100%;
+    min-height: 0;
+    padding: 10px 12px;
+  }
+
+  .auth-empty-state {
+    min-height: 100%;
+    padding: 12px 20px;
+  }
+
+  .auth-empty-state .empty-state-mark {
+    height: 40px;
+    margin-bottom: 8px;
+    border-radius: 12px;
+  }
+
+  .auth-empty-state strong {
+    font-size: 16px;
+  }
+
+  .auth-empty-state p {
+    margin: 5px 0 10px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .auth-empty-state .primary-button {
+    min-width: 150px;
+    min-height: 40px;
+  }
+
+  .mobile-menu-backdrop {
+    position: fixed;
+    z-index: 100;
+    inset: 0;
+    display: block;
+    background: rgba(33, 25, 38, .48);
+  }
+
+  .mobile-menu-panel {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    width: min(70vw, 560px);
+    height: 100dvh;
+    background: #fff;
+  }
+}
+
+/* 회전·스크롤 안정화: 앱 프레임과 실제 스크롤 영역의 책임을 분리 */
+.workspace--context,
+.workspace-content,
+.view,
+.map-panel {
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-content {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+/* 두 손가락 확대는 첫 제스처부터 지도 박스가 직접 처리해야 한다. */
+.view--seats .map-panel {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+@media (orientation: portrait) and (min-width: 701px) and (max-width: 1180px) {
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .tablet-shell,
+  .workspace--context {
+    height: 100svh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .workspace--context {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .workspace-content {
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .workspace-content > .view:not(.view--seats) {
+    height: max-content;
+    min-height: 100%;
+    overflow: visible;
+  }
+
+  .workspace-content > .view--seats {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 700px) {
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .tablet-shell,
+  .workspace--context,
+  .selection-shell {
+    height: 100svh;
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .workspace-content {
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .workspace-content > .view:not(.view--seats) {
+    height: max-content;
+    min-height: 100%;
+    overflow: visible;
+  }
+
+  .operation-event .realtime-state {
+    display: none;
+  }
+
+  .selection-shell {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (orientation: landscape) and (max-width: 900px) and (max-height: 500px) {
+  .tablet-shell,
+  .workspace--context,
+  .mobile-menu-panel {
+    height: 100svh;
+    height: 100dvh;
+  }
+
+  .workspace-content > .view:not(.view--seats) {
+    height: max-content;
+    min-height: 100%;
+    overflow: visible;
+  }
+
+  .workspace-content > .view--seats {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .view--seats .toolbar,
+  .mobile-menu-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
+
+  .mobile-menu-panel > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 56px;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--mobile-line, #e9e5ec);
+  }
+
+  .mobile-menu-panel > header > button {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    color: #3a333f;
+    background: transparent;
+  }
+
+  .mobile-menu-profile,
+  .mobile-menu-profile > div {
+    display: flex;
+    min-width: 0;
+  }
+
+  .mobile-menu-profile {
+    align-items: center;
+    gap: 9px;
+  }
+
+  .mobile-menu-profile > div {
+    flex-direction: column;
+  }
+
+  .mobile-menu-context {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    margin: 8px 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #fff;
+    background: var(--purple-700);
+  }
+
+  .mobile-menu-context > div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+  }
+
+  .mobile-menu-context strong,
+  .mobile-menu-context span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-menu-context button {
+    min-height: 40px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 7px;
+    color: #fff;
+    background: rgba(255, 255, 255, .18);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .mobile-menu-scroll {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 0 14px 14px;
+  }
+
+  .mobile-menu-scroll section {
+    margin-top: 12px;
+  }
+
+  .mobile-menu-scroll h2 {
+    margin: 0 0 4px;
+    color: var(--gray-600);
+    font-size: 11px;
+  }
+
+  .mobile-menu-scroll nav {
+    border-top: 1px solid var(--mobile-line, #e9e5ec);
+  }
+
+  .mobile-menu-scroll nav button {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 56px;
+    padding: 7px 4px;
+    border: 0;
+    border-bottom: 1px solid var(--mobile-line, #e9e5ec);
+    color: #39323e;
+    background: #fff;
+    text-align: left;
+  }
+
+  .mobile-menu-scroll nav button > span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+  }
+
+  .mobile-menu-scroll nav button small {
+    overflow: hidden;
+    color: #89828d;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-menu-panel > footer {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--mobile-line, #e9e5ec);
+    color: #6c6570;
+    background: #faf9fb;
+    font-size: 11px;
+  }
+
+  .selection-shell {
+    height: 100svh;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+}

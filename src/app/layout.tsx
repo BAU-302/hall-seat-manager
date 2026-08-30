@@ -4,6 +4,7 @@ import "./globals.css";
 import "./group-colors.css";
 import "./mobile-layout.css";
 import "./mobile-refresh.css";
+import "./design-polish.css";
 
 export const metadata: Metadata = {
   title: "홀 좌석 현장 운영 시스템",

@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "./globals.css";
 import "./group-colors.css";
 import "./mobile-layout.css";
+import "./mobile-refresh.css";
 
 export const metadata: Metadata = {
   title: "홀 좌석 현장 운영 시스템",

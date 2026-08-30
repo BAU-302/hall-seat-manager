@@ -4,6 +4,26 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import type { CSSProperties, Dispatch, FormEvent, PointerEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
 import Image from "next/image";
+import {
+  Armchair,
+  ArrowsLeftRight,
+  Buildings,
+  CalendarDots,
+  CaretRight,
+  ClockCounterClockwise,
+  Gauge,
+  House,
+  List,
+  QrCode,
+  Scan,
+  SignIn,
+  SignOut,
+  Ticket,
+  UserGear,
+  UsersThree,
+  WifiHigh,
+  X,
+} from "@phosphor-icons/react";
 import { FALLBACK_HALLS, FALLBACK_SESSIONS } from "@/lib/hall-catalog";
 import type { Hall, HallId, Session } from "@/lib/hall-catalog";
 import { createClient } from "@/lib/supabase/client";
@@ -270,6 +290,18 @@ const MENU: Array<[MenuId, string]> = [
 ];
 const ENTRANCE_MENU_IDS=new Set<MenuId>(["dashboard","seats","entry","scan","history"]);
 const ROLE_LABEL:Record<string,string>={super_admin:"최고 관리자",event_manager:"운영 매니저",entrance_staff:"입장 직원"};
+
+function MenuIcon({ id, size = 21 }: { id: MenuId; size?: number }) {
+  if (id === "dashboard") return <Gauge size={size} weight="regular" />;
+  if (id === "seats") return <Armchair size={size} weight="regular" />;
+  if (id === "allocation") return <UsersThree size={size} weight="regular" />;
+  if (id === "entry") return <Ticket size={size} weight="regular" />;
+  if (id === "scan") return <Scan size={size} weight="regular" />;
+  if (id === "generate") return <QrCode size={size} weight="regular" />;
+  if (id === "reassign") return <ArrowsLeftRight size={size} weight="regular" />;
+  if (id === "history") return <ClockCounterClockwise size={size} weight="regular" />;
+  return <CalendarDots size={size} weight="regular" />;
+}
 
 type CatalogContextValue = {
   halls: Hall[];
@@ -1176,7 +1208,7 @@ function SeatMapView({ floor,setFloor,query,setQuery,selected,setSelected,setCon
 }
 
 function SeatManagerAppInner() {
-  const { user, profile } = useCatalog();
+  const { user, profile, requestAuth, signOut } = useCatalog();
   const [hall,setHall]=useState<Hall | null>(null);
   const [session,setSession]=useState<Session | null>(null);
   const [changeOpen,setChangeOpen]=useState(false);
@@ -1201,12 +1233,49 @@ function SeatManagerAppInner() {
   if(!session)return <EventSelectView hall={hall} onBack={goHome} onSelect={openSession}/>;
   const visibleMenu=profile?.role==="entrance_staff"?MENU.filter(([id])=>ENTRANCE_MENU_IDS.has(id)):MENU;
   const activeMenuLabel=visibleMenu.find(([id])=>id===active)?.[1]??"메뉴";
-  const navigateMenu=(id:MenuId)=>{setActive(id);setMobileMenuOpen(false);};
+  const navigateMenu=(id:MenuId)=>{
+    setActive(id);
+    setMobileMenuOpen(false);
+    requestAnimationFrame(()=>workspaceContentRef.current?.scrollTo({top:0,left:0,behavior:"auto"}));
+  };
+  const operationalMenu=visibleMenu.filter(([id])=>["dashboard","seats","entry","scan"].includes(id));
+  const managementMenu=visibleMenu.filter(([id])=>["allocation","generate","reassign","history","events"].includes(id));
   const updateStats=(distributed:number,entered:number)=>setSession((current)=>current?{...current,distributed,entered}:current);
   const dashboardSession=realtime.stats?.sessionId===session.sessionId?{...session,distributed:realtime.stats.distributed,entered:realtime.stats.entered}:session;
-  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={setActive} hall={hall} session={dashboardSession} stats={realtime.stats?.sessionId===session.sessionId?realtime.stats:null}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='entry')return <EntryView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='scan')return <ScanView hall={hall} session={session} onStats={updateStats}/>;if(active==='generate')return <GenerateView hall={hall} session={session} revision={revision}/>;if(active==='reassign')return <ReassignView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='history')return <HistoryView hall={hall} session={session} revision={revision}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session,revision,realtimeStatus}} onStats={updateStats}/>;};
+  const render=()=>{if(active==='dashboard')return <DashboardView onNavigate={navigateMenu} hall={hall} session={dashboardSession} stats={realtime.stats?.sessionId===session.sessionId?realtime.stats:null}/>;if(active==='allocation')return <AllocationView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='entry')return <EntryView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='scan')return <ScanView hall={hall} session={session} onStats={updateStats}/>;if(active==='generate')return <GenerateView hall={hall} session={session} revision={revision}/>;if(active==='reassign')return <ReassignView hall={hall} session={session} revision={revision} onStats={updateStats}/>;if(active==='history')return <HistoryView hall={hall} session={session} revision={revision}/>;if(active==='events')return <EventManagementView hall={hall} onChangeContext={()=>setChangeOpen(true)}/>;return <SeatMapView {...{floor,setFloor,query,setQuery,selected,setSelected,confirmed,setConfirmed,hall,session,revision,realtimeStatus}} onStats={updateStats}/>;};
   const operatorName = profile?.displayName || user?.email?.split("@")[0] || "로그인 필요";
-  return <main className="tablet-shell"><aside className="sidebar"><button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button><div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div><nav aria-label="주요 메뉴">{visibleMenu.map(([id,label],index)=><button key={id} className={active===id?'active':''} onClick={()=>setActive(id)}><span>{String(index+1).padStart(2,'0')}</span>{label}</button>)}</nav><div className="sidebar-bottom"><div><span className="user-avatar">{operatorName.slice(0,1)}</span><p><strong>{operatorName}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></p></div><button onClick={()=>profile?.role==="super_admin"?setStaffOpen(true):goHome()}>{profile?.role==="super_admin"?"직원 권한 설정":"홀 선택"}</button></div></aside><section className="workspace workspace--context"><div className="workspace-header"><div className="mobile-navigation-bar"><button type="button" aria-controls="mobile-main-menu" aria-expanded={mobileMenuOpen} onClick={()=>setMobileMenuOpen(true)}><span aria-hidden="true">☰</span> 메뉴</button><strong>{activeMenuLabel}</strong></div><OperationContextBar hall={hall} session={session} realtimeStatus={realtimeStatus} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/></div><div ref={workspaceContentRef} className="workspace-content">{render()}</div></section>{mobileMenuOpen&&<div className="mobile-menu-backdrop" role="presentation" onMouseDown={(event)=>{if(event.target===event.currentTarget)setMobileMenuOpen(false);}}><aside id="mobile-main-menu" className="mobile-menu-panel" role="dialog" aria-modal="true" aria-label="주요 메뉴"><header><div><span>현재 운영</span><strong>{hall.name}</strong><small>{session.event} · {session.time}</small></div><button type="button" onClick={()=>setMobileMenuOpen(false)} aria-label="메뉴 닫기">×</button></header><nav aria-label="모바일 주요 메뉴">{visibleMenu.map(([id,label],index)=><button type="button" key={id} className={active===id?"active":""} onClick={()=>navigateMenu(id)}><span>{String(index+1).padStart(2,"0")}</span><strong>{label}</strong></button>)}</nav><footer><button type="button" onClick={()=>{setMobileMenuOpen(false);setChangeOpen(true);}}>홀·행사 변경</button>{profile?.role==="super_admin"&&<button type="button" onClick={()=>{setMobileMenuOpen(false);setStaffOpen(true);}}>직원 권한 설정</button>}</footer></aside></div>}{changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>} {staffOpen&&<StaffSettingsModal onClose={()=>setStaffOpen(false)}/>}</main>;
+  const mobileTabs: Array<[MenuId | "menu", string]> = [["dashboard","홈"],["seats","좌석"],["scan","스캔"],["history","이력"],["menu","메뉴"]];
+  return <main className="tablet-shell" data-active={active}>
+    <aside className="sidebar">
+      <button className="brand-button" onClick={goHome} aria-label="전체 홀 선택으로"><BrandLockup/></button>
+      <div className="sidebar-context"><span>현재 운영</span><strong>{hall.name}</strong><small>{session.time} · {session.round}</small></div>
+      <nav aria-label="주요 메뉴">{visibleMenu.map(([id,label],index)=><button key={id} className={active===id?'active':''} onClick={()=>navigateMenu(id)}><span>{String(index+1).padStart(2,'0')}</span>{label}</button>)}</nav>
+      <div className="sidebar-bottom"><div><span className="user-avatar">{operatorName.slice(0,1)}</span><p><strong>{operatorName}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></p></div><button onClick={()=>profile?.role==="super_admin"?setStaffOpen(true):goHome()}>{profile?.role==="super_admin"?"직원 권한 설정":"홀 선택"}</button></div>
+    </aside>
+    <section className="workspace workspace--context">
+      <div className="workspace-header">
+        <div className="mobile-navigation-bar">
+          <button type="button" aria-controls="mobile-main-menu" aria-expanded={mobileMenuOpen} onClick={()=>setMobileMenuOpen(true)} aria-label="전체 메뉴 열기"><List size={23}/></button>
+          <strong>{activeMenuLabel}</strong>
+          <div className="mobile-header-status"><span className={`realtime-dot realtime-dot--${realtimeStatus}`} aria-hidden="true"/><small>{realtimeStatus==="live"?"실시간":realtimeStatus==="connecting"?"연결 중":"오프라인"}</small><span className="mobile-user-avatar">{operatorName.slice(0,1)}</span><b>{operatorName}</b></div>
+        </div>
+        <OperationContextBar hall={hall} session={session} realtimeStatus={realtimeStatus} onHome={goHome} onHall={()=>setSession(null)} onChange={()=>setChangeOpen(true)}/>
+      </div>
+      <div ref={workspaceContentRef} className="workspace-content">{render()}</div>
+      <nav className="mobile-bottom-nav" aria-label="모바일 빠른 메뉴">{mobileTabs.map(([id,label])=>{const isMenu=id==="menu";const isActive=isMenu?mobileMenuOpen:active===id;return <button type="button" key={id} className={`${isActive?"active":""} ${id==="scan"?"mobile-scan-tab":""}`} onClick={()=>isMenu?setMobileMenuOpen(true):navigateMenu(id as MenuId)}>{id==="dashboard"?<House size={21}/>:id==="seats"?<Armchair size={21}/>:id==="scan"?<Scan size={25}/>:id==="history"?<ClockCounterClockwise size={21}/>:<List size={21}/>}<span>{label}</span></button>;})}</nav>
+    </section>
+    {mobileMenuOpen&&<div className="mobile-menu-backdrop" role="presentation"><aside id="mobile-main-menu" className="mobile-menu-panel" role="dialog" aria-modal="true" aria-label="주요 메뉴">
+      <header><div className="mobile-menu-profile"><span className="mobile-menu-avatar">{operatorName.slice(0,1)}</span><div><strong>{operatorName}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></div></div><button type="button" onClick={()=>setMobileMenuOpen(false)} aria-label="메뉴 닫기"><X size={23}/></button></header>
+      <div className="mobile-menu-context"><Buildings size={20}/><div><strong>{hall.name} · {session.event}</strong><span>{session.date} · {session.time} {session.round}</span></div><button type="button" onClick={()=>{setMobileMenuOpen(false);setChangeOpen(true);}}>변경</button></div>
+      <div className="mobile-menu-scroll">
+        <section><h2>현장 운영</h2><nav>{operationalMenu.map(([id,label])=><button type="button" key={id} className={active===id?"active":""} onClick={()=>navigateMenu(id)}><MenuIcon id={id}/><span><strong>{label}</strong><small>{id==="dashboard"?"실시간 입장 현황 확인":id==="seats"?"좌석표에서 상태 확인과 입장":id==="entry"?"수동 입장 및 취소":"QR 연속 스캔 입장"}</small></span><CaretRight size={17}/></button>)}</nav></section>
+        {managementMenu.length>0&&<section><h2>관리</h2><nav>{managementMenu.map(([id,label])=><button type="button" key={id} className={active===id?"active":""} onClick={()=>navigateMenu(id)}><MenuIcon id={id}/><span><strong>{label}</strong><small>{id==="allocation"?"단체·개인·현장 좌석 배분":id==="generate"?"개별·구역·전체 QR 생성":id==="reassign"?"기존 QR 유지 좌석 변경":id==="history"?"모든 처리 기록 확인":"행사 및 회차 관리"}</small></span><CaretRight size={17}/></button>)}</nav></section>}
+        <section><h2>계정·설정</h2><nav>{profile?.role==="super_admin"&&<button type="button" onClick={()=>{setMobileMenuOpen(false);setStaffOpen(true);}}><UserGear size={21}/><span><strong>직원 권한 설정</strong><small>역할과 운영 홀 권한 관리</small></span><CaretRight size={17}/></button>}<button type="button" onClick={()=>{setMobileMenuOpen(false);setChangeOpen(true);}}><Buildings size={21}/><span><strong>홀·행사 변경</strong><small>다른 운영 회차로 이동</small></span><CaretRight size={17}/></button>{user?<button type="button" className="mobile-signout" onClick={()=>void signOut()}><SignOut size={21}/><span><strong>로그아웃</strong><small>현재 기기에서 세션 종료</small></span><CaretRight size={17}/></button>:<button type="button" className="mobile-login" onClick={()=>{setMobileMenuOpen(false);requestAuth();}}><SignIn size={21}/><span><strong>직원 로그인</strong><small>어느 화면에서든 바로 로그인</small></span><CaretRight size={17}/></button>}</nav></section>
+      </div>
+      <footer><WifiHigh size={18}/><span>{realtimeStatus==="live"?"실시간 데이터가 연결되어 있습니다.":realtimeStatus==="connecting"?"실시간 연결을 확인하고 있습니다.":"오프라인에서는 입장 처리가 중지됩니다."}</span></footer>
+    </aside></div>}
+    {changeOpen&&<ChangeContextModal currentHall={hall} currentSession={session} onClose={()=>setChangeOpen(false)} onApply={changeContext}/>} {staffOpen&&<StaffSettingsModal onClose={()=>setStaffOpen(false)}/>}
+  </main>;
 }
 
 export function SeatManagerApp({ initialHalls = FALLBACK_HALLS, initialSessions = FALLBACK_SESSIONS, dataSource = "fallback" }: { initialHalls?: Hall[]; initialSessions?: Session[]; dataSource?: "supabase" | "fallback" }) {

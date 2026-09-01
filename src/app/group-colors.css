@@ -130,7 +130,8 @@
 }
 
 .svg-seat.has-group-color text { fill: var(--seat-group-text); }
-.svg-seat--entered.has-group-color rect { fill: var(--seat-group-color); stroke: #078443; stroke-width: 2.25; }
+.svg-seat--entered.has-group-color rect { fill: var(--green); stroke: #08743e; stroke-width: .8; }
+.svg-seat--entered.has-group-color text { fill: #fff; }
 
 /* 현장 확보는 단체 색상 데이터가 남아 있어도 고유 주황색을 우선한다. */
 .svg-seat--onsite.has-group-color rect {
@@ -150,7 +151,7 @@
   pointer-events: none;
 }
 
-.svg-seat--entered:not(.has-group-color) .seat-entry-check { stroke: #fff; }
+.svg-seat--entered .seat-entry-check { stroke: #fff; }
 .svg-seat.is-group-dimmed { opacity: .16; }
 .svg-seat.is-group-focused rect { stroke: #4a1b69; stroke-width: 2; }
 .svg-seat.is-group-dimmed.is-selected,

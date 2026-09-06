@@ -347,9 +347,9 @@ function AuthControl() {
   return <div className="selection-user"><span className="user-avatar">{name.slice(0, 1)}</span><div><strong>{name}</strong><small>{ROLE_LABEL[profile?.role||""]||"현장 운영 직원"}</small></div><button className="text-button" onClick={() => void signOut()}>로그아웃</button></div>;
 }
 
-function AuthModal({ onClose }: { onClose: () => void }) {
+function AuthModal({ onClose, initialMessage = "" }: { onClose: () => void; initialMessage?: string }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(initialMessage);
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1283,13 +1283,29 @@ export function SeatManagerApp({ initialHalls = FALLBACK_HALLS, initialSessions 
   const [profile, setProfile] = useState<{ displayName: string; role: string } | null>(null);
   const [accessibleHallCodes,setAccessibleHallCodes]=useState<HallId[]|null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState("");
+  const hadAuthenticatedUser = useRef(false);
   const supabase = useMemo(() => createClient(), []);
   useEffect(() => {
     let active = true;
+    let validation: Promise<void> | null = null;
+    const clearAuthState = (showExpiredPrompt: boolean) => {
+      if (!active) return;
+      const shouldPrompt = showExpiredPrompt && hadAuthenticatedUser.current;
+      hadAuthenticatedUser.current = false;
+      setUser(null);
+      setProfile(null);
+      setAccessibleHallCodes(null);
+      if (shouldPrompt) {
+        setAuthPrompt("로그인 시간이 만료되었습니다. 계속하려면 다시 로그인해 주세요.");
+        setAuthOpen(true);
+      }
+    };
     const loadProfile = async (nextUser: User | null) => {
       if (!active) return;
+      if (!nextUser) { clearAuthState(false); return; }
+      hadAuthenticatedUser.current = true;
       setUser(nextUser);
-      if (!nextUser) { setProfile(null); setAccessibleHallCodes(null); return; }
       const { data } = await supabase.from("profiles").select("display_name, role").eq("user_id", nextUser.id).maybeSingle();
       if(!active)return;
       setProfile(data ? { displayName: data.display_name, role: data.role } : null);
@@ -1297,10 +1313,44 @@ export function SeatManagerApp({ initialHalls = FALLBACK_HALLS, initialSessions 
       const {data:accessData}=await supabase.from("staff_hall_access").select("halls!inner(code)").eq("user_id",nextUser.id);
       if(active)setAccessibleHallCodes(((accessData??[]) as Array<{halls:unknown}>).flatMap((item)=>{const raw=Array.isArray(item.halls)?item.halls[0]:item.halls;return raw&&typeof raw==="object"?[(raw as {code:HallId}).code]:[];}));
     };
-    void supabase.auth.getUser().then(({ data }) => loadProfile(data.user));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => { void loadProfile(session?.user ?? null); });
-    return () => { active = false; listener.subscription.unsubscribe(); };
+    const validateSession = (showExpiredPrompt: boolean) => {
+      if (validation) return validation;
+      validation = (async () => {
+        const { data, error } = await supabase.auth.getUser();
+        if (!active) return;
+        if (!error && data.user) {
+          await loadProfile(data.user);
+          return;
+        }
+        if (!error || error.name === "AuthSessionMissingError" || [400, 401, 403].includes(error.status ?? 0) || /refresh token|session missing|jwt expired|user not found/i.test(error.message)) {
+          clearAuthState(showExpiredPrompt);
+          if (error) void supabase.auth.signOut({ scope: "local" });
+        }
+      })().finally(() => { validation = null; });
+      return validation;
+    };
+    void validateSession(false);
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || !session) {
+        clearAuthState(event === "SIGNED_OUT");
+        return;
+      }
+      window.setTimeout(() => { void validateSession(event !== "INITIAL_SESSION"); }, 0);
+    });
+    const validateWhenActive = () => { if (document.visibilityState === "visible" && navigator.onLine) void validateSession(true); };
+    const validateWhenOnline = () => { void validateSession(true); };
+    document.addEventListener("visibilitychange", validateWhenActive);
+    window.addEventListener("pageshow", validateWhenActive);
+    window.addEventListener("online", validateWhenOnline);
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", validateWhenActive);
+      window.removeEventListener("pageshow", validateWhenActive);
+      window.removeEventListener("online", validateWhenOnline);
+    };
   }, [supabase]);
   const signOut = async () => { await supabase.auth.signOut(); window.location.reload(); };
-  return <CatalogContext.Provider value={{ halls: initialHalls, sessions: initialSessions, dataSource, user, profile, accessibleHallCodes, requestAuth: () => setAuthOpen(true), signOut }}><SeatManagerAppInner />{authOpen && <AuthModal onClose={() => setAuthOpen(false)}/>}</CatalogContext.Provider>;
+  const requestAuth = () => { setAuthPrompt(""); setAuthOpen(true); };
+  return <CatalogContext.Provider value={{ halls: initialHalls, sessions: initialSessions, dataSource, user, profile, accessibleHallCodes, requestAuth, signOut }}><SeatManagerAppInner />{authOpen && <AuthModal initialMessage={authPrompt} onClose={() => { setAuthOpen(false); setAuthPrompt(""); }}/>}</CatalogContext.Provider>;
 }

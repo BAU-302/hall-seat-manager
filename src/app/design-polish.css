@@ -385,7 +385,7 @@ select:focus-visible,
   .inline-controls select,
   .inline-controls input {
     min-height: 48px;
-    font-size: 14px;
+    font-size: 16px;
   }
 
   .primary-button,
